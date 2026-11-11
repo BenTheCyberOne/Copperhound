@@ -1,0 +1,52 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "00000032-0000-4000-8000-000000000032",
+   "HostingComputer": "S-1-5-21-1000-2000-3000-1000",
+   "Properties": {
+    "name": "CORP-CA@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "certthumbprint": "F656AE534A0DE9D68A0287993429AE18F1A50367",
+    "certchain": [
+     "F656AE534A0DE9D68A0287993429AE18F1A50367",
+     "B885D25D4074E073436994DD57B755FDFDC250C4"
+    ]
+   },
+   "EnabledCertTemplates": [
+    {
+     "ObjectIdentifier": "00000031-0000-4000-8000-000000000031",
+     "ObjectType": "CertTemplate"
+    },
+    {
+     "ObjectIdentifier": "00000037-0000-4000-8000-000000000037",
+     "ObjectType": "CertTemplate"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002D-0000-4000-8000-00000000002D",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "CORP.LOCAL-S-1-5-32-544",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "CORP.LOCAL-S-1-5-11",
+     "PrincipalType": "Group",
+     "RightName": "Enroll",
+     "IsInherited": false
+    }
+   ]
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "enterprisecas",
+  "count": 1,
+  "version": 6
+ }
+}

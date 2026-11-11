@@ -1,0 +1,136 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+   "Properties": {
+    "name": "USERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "S-1-5-21-1000-2000-3000",
+    "ObjectType": "Domain"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "00000004-0000-4000-8000-000000000004",
+   "Properties": {
+    "name": "COMPUTERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "S-1-5-21-1000-2000-3000",
+    "ObjectType": "Domain"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "00000016-0000-4000-8000-000000000016",
+   "Properties": {
+    "name": "MANAGED SERVICE ACCOUNTS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "S-1-5-21-1000-2000-3000",
+    "ObjectType": "Domain"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000001B-0000-4000-8000-00000000001B",
+   "Properties": {
+    "name": "FOREIGNSECURITYPRINCIPALS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "S-1-5-21-1000-2000-3000",
+    "ObjectType": "Domain"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002A-0000-4000-8000-00000000002A",
+   "Properties": {
+    "name": "SERVICES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002B-0000-4000-8000-00000000002B",
+   "Properties": {
+    "name": "PUBLIC KEY SERVICES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002A-0000-4000-8000-00000000002A",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002C-0000-4000-8000-00000000002C",
+   "Properties": {
+    "name": "CERTIFICATE TEMPLATES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002B-0000-4000-8000-00000000002B",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002D-0000-4000-8000-00000000002D",
+   "Properties": {
+    "name": "ENROLLMENT SERVICES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002B-0000-4000-8000-00000000002B",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002E-0000-4000-8000-00000000002E",
+   "Properties": {
+    "name": "CERTIFICATION AUTHORITIES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002B-0000-4000-8000-00000000002B",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "0000002F-0000-4000-8000-00000000002F",
+   "Properties": {
+    "name": "AIA@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002B-0000-4000-8000-00000000002B",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "containers",
+  "count": 10,
+  "version": 6
+ }
+}

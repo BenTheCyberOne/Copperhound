@@ -1,0 +1,25 @@
+[package]
+name = "ch-ingest"
+description = "CopperHound parallel ingest for SharpHound / bloodhound-python / ldapdomaindump collections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-model.workspace = true
+ch-store.workspace = true
+ahash.workspace = true
+anyhow.workspace = true
+flate2.workspace = true
+memchr.workspace = true
+memmap2.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+ch-synth.workspace = true
+ch-engine.workspace = true
+ch-query.workspace = true

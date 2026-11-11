@@ -1,0 +1,215 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-512",
+   "Properties": {
+    "name": "DOMAIN ADMINS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "admincount": true
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-500",
+     "ObjectType": "User"
+    },
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1106",
+     "ObjectType": "Group"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-513",
+   "Properties": {
+    "name": "DOMAIN USERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-515",
+   "Properties": {
+    "name": "DOMAIN COMPUTERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-516",
+   "Properties": {
+    "name": "DOMAIN CONTROLLERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-519",
+   "Properties": {
+    "name": "ENTERPRISE ADMINS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "admincount": true
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-500",
+     "ObjectType": "User"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1106",
+   "Properties": {
+    "name": "HELPDESK@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1104",
+     "ObjectType": "User"
+    },
+    {
+     "ObjectIdentifier": "CORP.LOCAL-S-1-5-11",
+     "ObjectType": "Group"
+    },
+    {
+     "ObjectIdentifier": "S-1-5-21-9-9-9-1600",
+     "ObjectType": "Base"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-512",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1105",
+     "PrincipalType": "User",
+     "RightName": "AddMember",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1104",
+     "PrincipalType": "User",
+     "RightName": "AddSelf",
+     "IsInherited": false
+    }
+   ]
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1111",
+   "Properties": {
+    "name": "REPL CHANGES@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1113",
+     "ObjectType": "User"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1112",
+   "Properties": {
+    "name": "REPL ALL@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1113",
+     "ObjectType": "User"
+    }
+   ],
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "CORP.LOCAL-S-1-5-32-544",
+   "Properties": {
+    "name": "ADMINISTRATORS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-512",
+     "ObjectType": "Group"
+    }
+   ],
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "CORP.LOCAL-S-1-5-11",
+   "Properties": {
+    "name": "AUTHENTICATED USERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [],
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "CORP.LOCAL-S-1-5-9",
+   "Properties": {
+    "name": "ENTERPRISE DOMAIN CONTROLLERS@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000"
+   },
+   "Members": [],
+   "Aces": []
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "groups",
+  "count": 11,
+  "version": 6
+ }
+}

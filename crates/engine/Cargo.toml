@@ -1,0 +1,14 @@
+[package]
+name = "ch-engine"
+description = "CopperHound graph algorithms: attack paths, Tier Zero exposure, choke points"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-model.workspace = true
+ch-store.workspace = true
+ahash.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+serde.workspace = true

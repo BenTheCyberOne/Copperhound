@@ -1,0 +1,144 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1104",
+   "Properties": {
+    "name": "ALICE@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-513",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-512",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1105",
+     "PrincipalType": "User",
+     "RightName": "ForceChangePassword",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1106",
+     "PrincipalType": "Group",
+     "RightName": "WriteSPN",
+     "IsInherited": true
+    }
+   ]
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1105",
+   "Properties": {
+    "name": "BOB@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "dontreqpreauth": true,
+    "hasspn": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-513",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": [],
+   "AllowedToDelegate": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1107",
+     "ObjectType": "Computer"
+    }
+   ],
+   "HasSIDHistory": [
+    {
+     "ObjectIdentifier": "S-1-5-21-9-9-9-1500",
+     "ObjectType": "Base"
+    }
+   ]
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1110",
+   "Properties": {
+    "name": "SVC_SYNC@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "admincount": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-513",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1113",
+   "Properties": {
+    "name": "CAROL@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-513",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000002-0000-4000-8000-000000000002",
+    "ObjectType": "OU"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-500",
+   "Properties": {
+    "name": "ADMINISTRATOR@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "admincount": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-513",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000003-0000-4000-8000-000000000003",
+    "ObjectType": "Container"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1109",
+   "Properties": {
+    "name": "GMSA_WEB$@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "hasspn": true,
+    "gmsa": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-515",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000016-0000-4000-8000-000000000016",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1108",
+     "PrincipalType": "Computer",
+     "RightName": "ReadGMSAPassword",
+     "IsInherited": false
+    }
+   ]
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "users",
+  "count": 6,
+  "version": 6
+ }
+}

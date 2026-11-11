@@ -1,0 +1,5 @@
+/target
+/bench
+*.chg/
+__pycache__/
+.claude/

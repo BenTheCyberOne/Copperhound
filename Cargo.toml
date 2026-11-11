@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+ch-model = { path = "crates/model" }
+ch-store = { path = "crates/store" }
+ch-ingest = { path = "crates/ingest" }
+ch-engine = { path = "crates/engine" }
+ch-synth = { path = "crates/synth" }
+ch-query = { path = "crates/query" }
+ch-server = { path = "crates/server" }
+ch-analysis = { path = "crates/analysis" }
+
+ahash = "0.8"
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+memchr = "2"
+memmap2 = "0.9"
+parking_lot = "0.12"
+rayon = "1"
+roaring = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+debug = "line-tables-only"

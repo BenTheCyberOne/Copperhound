@@ -1,0 +1,470 @@
+# extended LDIF
+#
+# LDAPv3
+# base <DC=corp,DC=local> with scope subtree
+# filter: (objectClass=*)
+# requesting: * nTSecurityDescriptor
+#
+version: 1
+
+# corp, DC=local
+dn: DC=corp,DC=local
+objectClass: top
+objectClass: domain
+objectClass: domainDNS
+distinguishedName: DC=corp,DC=local
+objectGUID:: AQAAAAAAAECAAAAAAAAAAQ==
+whenCreated: 20240102030405.0Z
+objectSid:: AQQAAAAAAAUVAAAA6AMAANAHAAC4CwAA
+name: corp
+gPLink: [LDAP://cn={31B2F340-016D-11D2-945F-00C04FB984F9},cn=policies,cn=sys
+ tem,DC=corp,DC=local;0]
+msDS-Behavior-Version: 7
+ms-DS-MachineAccountQuota: 10
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgB0AQgAAAAFADgAAAEAAAEAAACq9jERB5zREfefAMBPwtzSAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAVgQAAAUAOAAAAQAAAQAAAK32MREHnNER958AwE/C3NIBBQAAAAAABRUAAAD
+ oAwAA0AcAALgLAABWBAAAAAAYAAAADAABAgAAAAAABSAAAAAgAgAABQAoAAABAAABAAAAqvYxEQ
+ ec0RH3nwDAT8Lc0gEBAAAAAAAFCQAAAAAAFACUAAIAAQEAAAAAAAULAAAABQA4AAABAAABAAAAq
+ vYxEQec0RH3nwDAT8Lc0gEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFcEAAAFADgAAAEAAAEAAAB2
+ W+mJTURiTJkaD6y+2mQMAQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAVwQAAAUAOAAAAQAAAQAAAK3
+ 2MREHnNER958AwE/C3NIBBQAAAAAABRUAAADoAwAA0AcAALgLAABYBAAA
+
+# Staff, DC=corp,DC=local
+dn: OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: organizationalUnit
+distinguishedName: OU=Staff,DC=corp,DC=local
+objectGUID:: AgAAAAAAAECAAAAAAAAAAg==
+whenCreated: 20240102030405.0Z
+ou: Staff
+name: Staff
+gPLink: [LDAP://cn={AAAA0000-0000-0000-0000-000000000024},cn=policies,cn=sys
+ tem,DC=corp,DC=local;0][LDAP://cn={31B2F340-016D-11D2-945F-00C04FB984F9},cn
+ =policies,cn=system,DC=corp,DC=local;1]
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgBkAAIAAAAACiQA/wEPAAEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFIEAAAFADgA
+ IAAAAAEAAADBOw7z8J/REbYDAAD4A2fBAQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAUQQAAA==
+
+# Users, DC=corp,DC=local
+dn: CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=Users,DC=corp,DC=local
+objectGUID:: AwAAAAAAAECAAAAAAAAAAw==
+whenCreated: 20240102030405.0Z
+cn: Users
+
+# Computers, DC=corp,DC=local
+dn: CN=Computers,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=Computers,DC=corp,DC=local
+objectGUID:: BAAAAAAAAECAAAAAAAAABA==
+whenCreated: 20240102030405.0Z
+cn: Computers
+
+# Domain Controllers, DC=corp,DC=local
+dn: OU=Domain Controllers,DC=corp,DC=local
+objectClass: top
+objectClass: organizationalUnit
+distinguishedName: OU=Domain Controllers,DC=corp,DC=local
+objectGUID:: BQAAAAAAAECAAAAAAAAABQ==
+whenCreated: 20240102030405.0Z
+ou: Domain Controllers
+name: Domain Controllers
+
+# Alice Smith, OU=Staff,DC=corp,DC=local
+dn: CN=Alice Smith,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+distinguishedName: CN=Alice Smith,OU=Staff,DC=corp,DC=local
+objectGUID:: BgAAAAAAAECAAAAAAAAABg==
+whenCreated: 20240102030405.0Z
+cn: Alice Smith
+name: Alice Smith
+sAMAccountName: alice
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAUAQAAA==
+userAccountControl: 66048
+primaryGroupID: 513
+description: Helpdesk lead, with a description long enough that ldapsearch f
+ olds the line
+pwdLastSet: 133500000000000000
+lastLogonTimestamp: 133500000000000000
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgDAAAMAAAAFADgAAAEAAAEAAABwlSkAbSTQEadoAKoAbgUpAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAUQQAAAUQOAD/AQ8AAgAAAJx6lr/mDdARooUAqgAwSeIBBQAAAAAABRUAAAD
+ oAwAA0AcAALgLAABSBAAABRBIACAAAAADAAAAiEem8wZT0RGpxQAA+ANnwbp6lr/mDdARooUAqg
+ AwSeIBBQAAAAAABRUAAADoAwAA0AcAALgLAABSBAAA
+
+# Bob, OU=Staff,DC=corp,DC=local
+dn: CN=Bob,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+distinguishedName: CN=Bob,OU=Staff,DC=corp,DC=local
+objectGUID:: BwAAAAAAAECAAAAAAAAABw==
+whenCreated: 20240102030405.0Z
+cn: Bob
+name: Bob
+sAMAccountName: bob
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAUQQAAA==
+userAccountControl: 4194816
+primaryGroupID: 513
+servicePrincipalName: MSSQLSvc/sql01.corp.local:1433
+sIDHistory:: AQUAAAAAAAUVAAAACQAAAAkAAAAJAAAA3AUAAA==
+msDS-AllowedToDelegateTo: cifs/fs01.corp.local
+msDS-AllowedToDelegateTo: cifs/FS01
+
+# svc_sync, CN=Users,DC=corp,DC=local
+dn: CN=svc_sync,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+distinguishedName: CN=svc_sync,CN=Users,DC=corp,DC=local
+objectGUID:: CAAAAAAAAECAAAAAAAAACA==
+whenCreated: 20240102030405.0Z
+cn: svc_sync
+sAMAccountName: svc_sync
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAVgQAAA==
+userAccountControl: 512
+primaryGroupID: 513
+adminCount: 1
+
+# Administrator, CN=Users,DC=corp,DC=local
+dn: CN=Administrator,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+distinguishedName: CN=Administrator,CN=Users,DC=corp,DC=local
+objectGUID:: CQAAAAAAAECAAAAAAAAACQ==
+whenCreated: 20240102030405.0Z
+cn: Administrator
+sAMAccountName: Administrator
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAA9AEAAA==
+userAccountControl: 512
+primaryGroupID: 513
+adminCount: 1
+
+# Domain Admins, CN=Users,DC=corp,DC=local
+dn: CN=Domain Admins,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Domain Admins,CN=Users,DC=corp,DC=local
+objectGUID:: CgAAAAAAAECAAAAAAAAACg==
+whenCreated: 20240102030405.0Z
+cn: Domain Admins
+sAMAccountName: Domain Admins
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAAAIAAA==
+adminCount: 1
+member: CN=Administrator,CN=Users,DC=corp,DC=local
+member: CN=Helpdesk,OU=Staff,DC=corp,DC=local
+
+# Domain Users, CN=Users,DC=corp,DC=local
+dn: CN=Domain Users,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Domain Users,CN=Users,DC=corp,DC=local
+objectGUID:: CwAAAAAAAECAAAAAAAAACw==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Domain Users
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAAQIAAA==
+
+# Domain Computers, CN=Users,DC=corp,DC=local
+dn: CN=Domain Computers,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Domain Computers,CN=Users,DC=corp,DC=local
+objectGUID:: DAAAAAAAAECAAAAAAAAADA==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Domain Computers
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAAwIAAA==
+
+# Domain Controllers, CN=Users,DC=corp,DC=local
+dn: CN=Domain Controllers,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Domain Controllers,CN=Users,DC=corp,DC=local
+objectGUID:: DQAAAAAAAECAAAAAAAAADQ==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Domain Controllers
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAABAIAAA==
+
+# Enterprise Admins, CN=Users,DC=corp,DC=local
+dn: CN=Enterprise Admins,CN=Users,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Enterprise Admins,CN=Users,DC=corp,DC=local
+objectGUID:: HgAAAAAAAECAAAAAAAAAHg==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Enterprise Admins
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAABwIAAA==
+adminCount: 1
+member: CN=Administrator,CN=Users,DC=corp,DC=local
+
+# Helpdesk, OU=Staff,DC=corp,DC=local
+dn: CN=Helpdesk,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Helpdesk,OU=Staff,DC=corp,DC=local
+objectGUID:: DgAAAAAAAECAAAAAAAAADg==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Helpdesk
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAUgQAAA==
+member: CN=Alice Smith,OU=Staff,DC=corp,DC=local
+member: CN=S-1-5-11,CN=ForeignSecurityPrincipals,DC=corp,DC=local
+member: CN=S-1-5-21-9-9-9-1600,CN=ForeignSecurityPrincipals,DC=corp,DC=local
+member: CN=Ghost,OU=Gone,DC=corp,DC=local
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgB4AAIAAAAFADgAIAAAAAEAAADAeZa/5g3QEaKFAKoAMEniAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAUQQAAAUAOAAIAAAAAQAAAMB5lr/mDdARooUAqgAwSeIBBQAAAAAABRUAAAD
+ oAwAA0AcAALgLAABQBAAA
+
+# Repl Changes, OU=Staff,DC=corp,DC=local
+dn: CN=Repl Changes,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Repl Changes,OU=Staff,DC=corp,DC=local
+objectGUID:: HwAAAAAAAECAAAAAAAAAHw==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Repl Changes
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAVwQAAA==
+member: CN=Carol,OU=Staff,DC=corp,DC=local
+
+# Repl All, OU=Staff,DC=corp,DC=local
+dn: CN=Repl All,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Repl All,OU=Staff,DC=corp,DC=local
+objectGUID:: IAAAAAAAAECAAAAAAAAAIA==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Repl All
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAWAQAAA==
+member: CN=Carol,OU=Staff,DC=corp,DC=local
+
+# Carol, OU=Staff,DC=corp,DC=local
+dn: CN=Carol,OU=Staff,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+distinguishedName: CN=Carol,OU=Staff,DC=corp,DC=local
+objectGUID:: IQAAAAAAAECAAAAAAAAAIQ==
+whenCreated: 20240102030405.0Z
+cn: Carol
+name: Carol
+sAMAccountName: carol
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAWQQAAA==
+userAccountControl: 512
+primaryGroupID: 513
+
+# Builtin, DC=corp,DC=local
+dn: CN=Builtin,DC=corp,DC=local
+objectClass: top
+objectClass: builtinDomain
+distinguishedName: CN=Builtin,DC=corp,DC=local
+objectGUID:: GgAAAAAAAECAAAAAAAAAGg==
+whenCreated: 20240102030405.0Z
+cn: Builtin
+
+# Administrators, CN=Builtin,DC=corp,DC=local
+dn: CN=Administrators,CN=Builtin,DC=corp,DC=local
+objectClass: top
+objectClass: group
+distinguishedName: CN=Administrators,CN=Builtin,DC=corp,DC=local
+objectGUID:: DwAAAAAAAECAAAAAAAAADw==
+whenCreated: 20240102030405.0Z
+sAMAccountName: Administrators
+objectSid:: AQIAAAAAAAUgAAAAIAIAAA==
+member: CN=Domain Admins,CN=Users,DC=corp,DC=local
+
+# ForeignSecurityPrincipals, DC=corp,DC=local
+dn: CN=ForeignSecurityPrincipals,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=ForeignSecurityPrincipals,DC=corp,DC=local
+objectGUID:: GwAAAAAAAECAAAAAAAAAGw==
+whenCreated: 20240102030405.0Z
+cn: ForeignSecurityPrincipals
+
+# S-1-5-11, CN=ForeignSecurityPrincipals,DC=corp,DC=local
+dn: CN=S-1-5-11,CN=ForeignSecurityPrincipals,DC=corp,DC=local
+objectClass: top
+objectClass: foreignSecurityPrincipal
+distinguishedName: CN=S-1-5-11,CN=ForeignSecurityPrincipals,DC=corp,DC=local
+objectGUID:: EAAAAAAAAECAAAAAAAAAEA==
+whenCreated: 20240102030405.0Z
+objectSid:: AQEAAAAAAAULAAAA
+
+# S-1-5-21-9-9-9-1600, CN=ForeignSecurityPrincipals,DC=corp,DC=local
+dn: CN=S-1-5-21-9-9-9-1600,CN=ForeignSecurityPrincipals,DC=corp,DC=local
+objectClass: top
+objectClass: foreignSecurityPrincipal
+distinguishedName: CN=S-1-5-21-9-9-9-1600,CN=ForeignSecurityPrincipals,DC=co
+ rp,DC=local
+objectGUID:: EQAAAAAAAECAAAAAAAAAEQ==
+whenCreated: 20240102030405.0Z
+objectSid:: AQUAAAAAAAUVAAAACQAAAAkAAAAJAAAAQAYAAA==
+
+# DC01, OU=Domain Controllers,DC=corp,DC=local
+dn: CN=DC01,OU=Domain Controllers,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+objectClass: computer
+distinguishedName: CN=DC01,OU=Domain Controllers,DC=corp,DC=local
+objectGUID:: EgAAAAAAAECAAAAAAAAAEg==
+whenCreated: 20240102030405.0Z
+cn: DC01
+sAMAccountName: DC01$
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAA6AMAAA==
+userAccountControl: 532480
+primaryGroupID: 516
+dNSHostName: dc01.corp.local
+operatingSystem: Windows Server 2022 Datacenter
+
+# FS01, CN=Computers,DC=corp,DC=local
+dn: CN=FS01,CN=Computers,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+objectClass: computer
+distinguishedName: CN=FS01,CN=Computers,DC=corp,DC=local
+objectGUID:: EwAAAAAAAECAAAAAAAAAEw==
+whenCreated: 20240102030405.0Z
+cn: FS01
+sAMAccountName: FS01$
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAUwQAAA==
+userAccountControl: 4096
+primaryGroupID: 515
+dNSHostName: fs01.corp.local
+ms-Mcs-AdmPwdExpirationTime: 133600000000000000
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgBAAAEAAAAFADgAEAEAAAEAAADUw7KhEREiIjMzRERVVWZmAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAUgQAAA==
+msDS-AllowedToActOnBehalfOfOtherIdentity:: AQAEgBQAAAAAAAAAAAAAACQAAAABAgAAA
+ AAABSAAAAAgAgAAAgAsAAEAAAAAACQA/wEPAAEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFQEAAA=
+
+# WS01, CN=Computers,DC=corp,DC=local
+dn: CN=WS01,CN=Computers,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+objectClass: computer
+distinguishedName: CN=WS01,CN=Computers,DC=corp,DC=local
+objectGUID:: FAAAAAAAAECAAAAAAAAAFA==
+whenCreated: 20240102030405.0Z
+cn: WS01
+sAMAccountName: WS01$
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAVAQAAA==
+userAccountControl: 4096
+primaryGroupID: 515
+dNSHostName: ws01.corp.local
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgAsAAEAAAAAACQA/wEPAAEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFIEAAA=
+
+# Managed Service Accounts, DC=corp,DC=local
+dn: CN=Managed Service Accounts,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=Managed Service Accounts,DC=corp,DC=local
+objectGUID:: FgAAAAAAAECAAAAAAAAAFg==
+whenCreated: 20240102030405.0Z
+cn: Managed Service Accounts
+
+# gmsa_web, CN=Managed Service Accounts,DC=corp,DC=local
+dn: CN=gmsa_web,CN=Managed Service Accounts,DC=corp,DC=local
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: user
+objectClass: computer
+objectClass: msDS-GroupManagedServiceAccount
+distinguishedName: CN=gmsa_web,CN=Managed Service Accounts,DC=corp,DC=local
+objectGUID:: FQAAAAAAAECAAAAAAAAAFQ==
+whenCreated: 20240102030405.0Z
+cn: gmsa_web
+sAMAccountName: gmsa_web$
+objectSid:: AQUAAAAAAAUVAAAA6AMAANAHAAC4CwAAVQQAAA==
+userAccountControl: 4096
+primaryGroupID: 515
+dNSHostName: gmsa_web.corp.local
+servicePrincipalName: http/web.corp.local
+msDS-GroupMSAMembership:: AQAEgBQAAAAAAAAAAAAAACQAAAABAgAAAAAABSAAAAAgAgAAAg
+ AsAAEAAAAAACQA/wEPAAEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFQEAAA=
+
+# System, DC=corp,DC=local
+dn: CN=System,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=System,DC=corp,DC=local
+objectGUID:: HAAAAAAAAECAAAAAAAAAHA==
+whenCreated: 20240102030405.0Z
+cn: System
+
+# Policies, CN=System,DC=corp,DC=local
+dn: CN=Policies,CN=System,DC=corp,DC=local
+objectClass: top
+objectClass: container
+distinguishedName: CN=Policies,CN=System,DC=corp,DC=local
+objectGUID:: HQAAAAAAAECAAAAAAAAAHQ==
+whenCreated: 20240102030405.0Z
+cn: Policies
+
+# {31B2F340-016D-11D2-945F-00C04FB984F9}, CN=Policies,CN=System,DC=corp,DC=local
+dn: CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=corp,
+ DC=local
+objectClass: top
+objectClass: container
+objectClass: groupPolicyContainer
+distinguishedName: CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=
+ System,DC=corp,DC=local
+objectGUID:: FwAAAAAAAECAAAAAAAAAFw==
+whenCreated: 20240102030405.0Z
+displayName: Default Domain Policy
+gPCFileSysPath: \\corp.local\sysvol\corp.local\Policies\{31B2F340-016D-11D2-
+ 945F-00C04FB984F9}
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAAAgAAAgAsAAEAAAAAACQAKAACAAEFAAAAAAAFFQAAAOgDAADQBwAAuAsAAFEEAAA=
+
+# {AAAA0000-0000-0000-0000-000000000024}, CN=Policies,CN=System,DC=corp,DC=local
+dn: CN={AAAA0000-0000-0000-0000-000000000024},CN=Policies,CN=System,DC=corp,
+ DC=local
+objectClass: top
+objectClass: container
+objectClass: groupPolicyContainer
+distinguishedName: CN={AAAA0000-0000-0000-0000-000000000024},CN=Policies,CN=
+ System,DC=corp,DC=local
+objectGUID:: GAAAAAAAAECAAAAAAAAAGA==
+whenCreated: 20240102030405.0Z
+displayName: Staff Policy
+
+# partner.local, CN=System,DC=corp,DC=local
+dn: CN=partner.local,CN=System,DC=corp,DC=local
+objectClass: top
+objectClass: leaf
+objectClass: trustedDomain
+distinguishedName: CN=partner.local,CN=System,DC=corp,DC=local
+objectGUID:: GQAAAAAAAECAAAAAAAAAGQ==
+whenCreated: 20240102030405.0Z
+trustPartner: partner.local
+securityIdentifier:: AQQAAAAAAAUVAAAACQAAAAkAAAAJAAAA
+trustDirection: 3
+trustType: 2
+trustAttributes: 8
+
+# search result
+search: 2
+result: 0 Success
+
+# refldap://corp.local/CN=Configuration,DC=corp,DC=local
+
+# numEntries: 33

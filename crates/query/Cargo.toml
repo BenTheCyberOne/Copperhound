@@ -1,0 +1,20 @@
+[package]
+name = "ch-query"
+description = "CHQL: CopperHound's Cypher-subset query language, compiled to native graph operations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-model.workspace = true
+ch-store.workspace = true
+ch-engine.workspace = true
+ahash.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex-automata = "0.4"
+
+[dev-dependencies]
+ch-ingest.workspace = true
+ch-synth.workspace = true

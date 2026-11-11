@@ -1,0 +1,31 @@
+[package]
+name = "copperhound"
+description = "CopperHound: scalable Active Directory attack-path analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "copperhound"
+path = "src/main.rs"
+
+[dependencies]
+ch-model.workspace = true
+ch-store.workspace = true
+ch-ingest.workspace = true
+ch-engine.workspace = true
+ch-synth.workspace = true
+ch-query.workspace = true
+ch-server.workspace = true
+ch-analysis.workspace = true
+humantime = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+anyhow.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+mimalloc = { version = "0.1.52", default-features = false }
+
+[dev-dependencies]
+zip.workspace = true

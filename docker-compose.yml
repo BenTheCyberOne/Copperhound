@@ -1,0 +1,42 @@
+# CopperHound — single container, no external database.
+#
+#   docker compose up -d --build
+#   docker compose logs copperhound | grep "Initial admin password"
+#
+# Then open http://127.0.0.1:8090 and log in as `admin`.
+# Data (uploads, graphs, marks, generated admin password) lives in the
+# `copperhound-data` volume.
+
+name: copperhound
+
+services:
+  copperhound:
+    build: .
+    image: copperhound:latest
+    ports:
+      # Bound to localhost by default; set COPPERHOUND_HOST=0.0.0.0 to expose
+      # on your network (put TLS in front of it if you do).
+      - "${COPPERHOUND_HOST:-127.0.0.1}:${COPPERHOUND_PORT:-8090}:8080"
+    environment:
+      # Leave empty to have a random password generated on first start.
+      - COPPERHOUND_ADMIN_PASSWORD=${COPPERHOUND_ADMIN_PASSWORD:-}
+      # Auto-ingest: files dropped here are ingested once they finish copying.
+      # Enable/configure under Admin → Settings (default folder /data/watch).
+      # To drop files from the host, uncomment the bind mount below and set
+      # COPPERHOUND_WATCH_DIR=/watch.
+      - COPPERHOUND_WATCH_DIR=${COPPERHOUND_WATCH_DIR:-}
+      # Built-in HTTPS: `self-signed` (certificate generated into the volume;
+      # add names via COPPERHOUND_TLS_HOSTNAMES), or mount a certificate and set
+      # COPPERHOUND_TLS_CERT / COPPERHOUND_TLS_KEY (renewals are picked up).
+      - COPPERHOUND_TLS=${COPPERHOUND_TLS:-}
+      - COPPERHOUND_TLS_HOSTNAMES=${COPPERHOUND_TLS_HOSTNAMES:-}
+      - COPPERHOUND_TLS_CERT=${COPPERHOUND_TLS_CERT:-}
+      - COPPERHOUND_TLS_KEY=${COPPERHOUND_TLS_KEY:-}
+    volumes:
+      - copperhound-data:/data
+      # - ./watch:/watch
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  copperhound-data:

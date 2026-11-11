@@ -1,0 +1,90 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1000",
+   "Properties": {
+    "name": "DC01.CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "unconstraineddelegation": true,
+    "isdc": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-516",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000005-0000-4000-8000-000000000005",
+    "ObjectType": "OU"
+   },
+   "Aces": []
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1107",
+   "Properties": {
+    "name": "FS01.CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true,
+    "haslaps": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-515",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000004-0000-4000-8000-000000000004",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-512",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1106",
+     "PrincipalType": "Group",
+     "RightName": "ReadLAPSPassword",
+     "IsInherited": false
+    }
+   ],
+   "AllowedToAct": [
+    {
+     "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1108",
+     "ObjectType": "Computer"
+    }
+   ]
+  },
+  {
+   "ObjectIdentifier": "S-1-5-21-1000-2000-3000-1108",
+   "Properties": {
+    "name": "WS01.CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "enabled": true
+   },
+   "PrimaryGroupSID": "S-1-5-21-1000-2000-3000-515",
+   "ContainedBy": {
+    "ObjectIdentifier": "00000004-0000-4000-8000-000000000004",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-512",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1106",
+     "PrincipalType": "Group",
+     "RightName": "GenericAll",
+     "IsInherited": false
+    }
+   ]
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "computers",
+  "count": 3,
+  "version": 6
+ }
+}

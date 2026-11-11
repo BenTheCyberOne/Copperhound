@@ -1,0 +1,27 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "00000034-0000-4000-8000-000000000034",
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002F-0000-4000-8000-00000000002F",
+    "ObjectType": "Container"
+   },
+   "Aces": [],
+   "Properties": {
+    "name": "CORP-ROOT@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "certthumbprint": "B885D25D4074E073436994DD57B755FDFDC250C4",
+    "certchain": [
+     "B885D25D4074E073436994DD57B755FDFDC250C4"
+    ]
+   }
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "aiacas",
+  "count": 1,
+  "version": 6
+ }
+}

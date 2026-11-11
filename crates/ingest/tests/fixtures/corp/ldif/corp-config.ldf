@@ -1,0 +1,202 @@
+dn: CN=CORP,CN=Partitions,CN=Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: crossRef
+distinguishedName: CN=CORP,CN=Partitions,CN=Configuration,DC=corp,DC=local
+objectGUID:: KQAAAAAAAECAAAAAAAAAKQ==
+whenCreated: 20240102030405.0Z
+nCName: DC=corp,DC=local
+nETBIOSName: CORP
+dnsRoot: corp.local
+
+dn: CN=Services,CN=Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=Services,CN=Configuration,DC=corp,DC=local
+objectGUID:: KgAAAAAAAECAAAAAAAAAKg==
+whenCreated: 20240102030405.0Z
+cn: Services
+
+dn: CN=Public Key Services,CN=Services,CN=Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=Public Key Services,CN=Services,CN=Configuration,DC=co
+ rp,DC=local
+objectGUID:: KwAAAAAAAECAAAAAAAAAKw==
+whenCreated: 20240102030405.0Z
+cn: Public Key Services
+
+dn: CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configura
+ tion,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=Certificate Templates,CN=Public Key Services,CN=Servic
+ es,CN=Configuration,DC=corp,DC=local
+objectGUID:: LAAAAAAAAECAAAAAAAAALA==
+whenCreated: 20240102030405.0Z
+cn: Certificate Templates
+
+dn: CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configurati
+ on,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=Enrollment Services,CN=Public Key Services,CN=Services
+ ,CN=Configuration,DC=corp,DC=local
+objectGUID:: LQAAAAAAAECAAAAAAAAALQ==
+whenCreated: 20240102030405.0Z
+cn: Enrollment Services
+
+dn: CN=Certification Authorities,CN=Public Key Services,CN=Services,CN=Confi
+ guration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=Certification Authorities,CN=Public Key Services,CN=Se
+ rvices,CN=Configuration,DC=corp,DC=local
+objectGUID:: LgAAAAAAAECAAAAAAAAALg==
+whenCreated: 20240102030405.0Z
+cn: Certification Authorities
+
+dn: CN=AIA,CN=Public Key Services,CN=Services,CN=Configuration,DC=corp,DC=lo
+ cal
+changetype: add
+objectClass: top
+objectClass: container
+distinguishedName: CN=AIA,CN=Public Key Services,CN=Services,CN=Configuratio
+ n,DC=corp,DC=local
+objectGUID:: LwAAAAAAAECAAAAAAAAALw==
+whenCreated: 20240102030405.0Z
+cn: AIA
+
+dn: CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DC=corp,DC=lo
+ cal
+changetype: add
+objectClass: top
+objectClass: msPKI-Enterprise-Oid
+distinguishedName: CN=OID,CN=Public Key Services,CN=Services,CN=Configuratio
+ n,DC=corp,DC=local
+objectGUID:: MAAAAAAAAECAAAAAAAAAMA==
+whenCreated: 20240102030405.0Z
+cn: OID
+
+dn: CN=ESC1,CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=C
+ onfiguration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: pKICertificateTemplate
+distinguishedName: CN=ESC1,CN=Certificate Templates,CN=Public Key Services,C
+ N=Services,CN=Configuration,DC=corp,DC=local
+objectGUID:: MQAAAAAAAECAAAAAAAAAMQ==
+whenCreated: 20240102030405.0Z
+cn: ESC1
+name: ESC1
+displayName: ESC1
+msPKI-Template-Schema-Version: 2
+msPKI-Enrollment-Flag: 0
+msPKI-Certificate-Name-Flag: 1
+pKIExtendedKeyUsage: 1.3.6.1.5.5.7.3.2
+msPKI-Certificate-Application-Policy: 1.3.6.1.5.5.7.3.2
+msPKI-RA-Signature: 0
+msPKI-Cert-Template-OID: 1.3.6.1.4.1.311.21.8.1.2.3
+msPKI-Certificate-Policy: 1.2.3.4
+pKIExpirationPeriod:: AEA5hy7h/v8=
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAHAgAAAgB4AAIAAAAFADgAAAEAAAEAAABoyRAO+3jSEZDUAMBPedxVAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAAQIAAAUAOAAgAAAAAQAAAMTdHer/YG5BjMAXzuU0vOcBBQAAAAAABRUAAAD
+ oAwAA0AcAALgLAABRBAAA
+
+dn: CN=WebServer,CN=Certificate Templates,CN=Public Key Services,CN=Services
+ ,CN=Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: pKICertificateTemplate
+distinguishedName: CN=WebServer,CN=Certificate Templates,CN=Public Key Servi
+ ces,CN=Services,CN=Configuration,DC=corp,DC=local
+objectGUID:: NwAAAAAAAECAAAAAAAAANw==
+whenCreated: 20240102030405.0Z
+cn: WebServer
+name: WebServer
+displayName: Web Server
+msPKI-Template-Schema-Version: 1
+msPKI-Enrollment-Flag: 0
+msPKI-Certificate-Name-Flag: 1
+pKIExtendedKeyUsage: 1.3.6.1.5.5.7.3.1
+msPKI-RA-Signature: 0
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAADAAAAABBQAAAAAABRUAAADoAwAA0AcAA
+ LgLAAAHAgAAAgBAAAEAAAAFADgAAAEAAAEAAABoyRAO+3jSEZDUAMBPedxVAQUAAAAAAAUVAAAA
+ 6AMAANAHAAC4CwAAAQIAAA==
+
+dn: CN=CORP-CA,CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=
+ Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: pKIEnrollmentService
+distinguishedName: CN=CORP-CA,CN=Enrollment Services,CN=Public Key Services,
+ CN=Services,CN=Configuration,DC=corp,DC=local
+objectGUID:: MgAAAAAAAECAAAAAAAAAMg==
+whenCreated: 20240102030405.0Z
+cn: CORP-CA
+name: CORP-CA
+dNSHostName: dc01.corp.local
+certificateTemplates: ESC1
+certificateTemplates: WebServer
+certificateTemplates: Missing
+cACertificate:: MCQwIKADAgECAgEBMAAwCUNPUlAtUk9PVDAAMAdDT1JQLUNBMAA=
+nTSecurityDescriptor:: AQAEgBQAAAAAAAAAAAAAACQAAAABAgAAAAAABSAAAAAgAgAAAgAwA
+ AEAAAAFACgAAAEAAAEAAABoyRAO+3jSEZDUAMBPedxVAQEAAAAAAAULAAAA
+
+dn: CN=CORP-ROOT,CN=Certification Authorities,CN=Public Key Services,CN=Serv
+ ices,CN=Configuration,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: certificationAuthority
+distinguishedName: CN=CORP-ROOT,CN=Certification Authorities,CN=Public Key S
+ ervices,CN=Services,CN=Configuration,DC=corp,DC=local
+objectGUID:: MwAAAAAAAECAAAAAAAAAMw==
+whenCreated: 20240102030405.0Z
+cn: CORP-ROOT
+cACertificate:: MCYwIqADAgECAgEBMAAwCUNPUlAtUk9PVDAAMAlDT1JQLVJPT1QwAA==
+
+dn: CN=CORP-ROOT,CN=AIA,CN=Public Key Services,CN=Services,CN=Configuration,
+ DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: certificationAuthority
+distinguishedName: CN=CORP-ROOT,CN=AIA,CN=Public Key Services,CN=Services,CN
+ =Configuration,DC=corp,DC=local
+objectGUID:: NAAAAAAAAECAAAAAAAAANA==
+whenCreated: 20240102030405.0Z
+cn: CORP-ROOT
+cACertificate:: MCYwIqADAgECAgEBMAAwCUNPUlAtUk9PVDAAMAlDT1JQLVJPT1QwAA==
+
+dn: CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuratio
+ n,DC=corp,DC=local
+changetype: add
+objectClass: top
+objectClass: certificationAuthority
+distinguishedName: CN=NTAuthCertificates,CN=Public Key Services,CN=Services,
+ CN=Configuration,DC=corp,DC=local
+objectGUID:: NQAAAAAAAECAAAAAAAAANQ==
+whenCreated: 20240102030405.0Z
+cn: NTAuthCertificates
+cACertificate:: MCQwIKADAgECAgEBMAAwCUNPUlAtUk9PVDAAMAdDT1JQLUNBMAA=
+
+dn: CN=400.ABC,CN=OID,CN=Public Key Services,CN=Services,CN=Configuration,DC
+ =corp,DC=local
+changetype: add
+objectClass: top
+objectClass: msPKI-Enterprise-Oid
+distinguishedName: CN=400.ABC,CN=OID,CN=Public Key Services,CN=Services,CN=C
+ onfiguration,DC=corp,DC=local
+objectGUID:: NgAAAAAAAECAAAAAAAAANg==
+whenCreated: 20240102030405.0Z
+cn: 400.ABC
+displayName: Low Assurance
+flags: 2
+msPKI-Cert-Template-OID: 1.2.3.4
+msDS-OIDToGroupLink: CN=Helpdesk,OU=Staff,DC=corp,DC=local
+

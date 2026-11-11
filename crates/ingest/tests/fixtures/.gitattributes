@@ -1,0 +1,2 @@
+# Fixtures are byte-exact (CRLF ldifde output, gzip): never convert line ends.
+corp/** -text

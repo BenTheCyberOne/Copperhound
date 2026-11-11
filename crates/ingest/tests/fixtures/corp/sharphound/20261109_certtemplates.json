@@ -1,0 +1,118 @@
+{
+ "data": [
+  {
+   "ObjectIdentifier": "00000031-0000-4000-8000-000000000031",
+   "Properties": {
+    "name": "ESC1@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "schemaversion": 2,
+    "requiresmanagerapproval": false,
+    "nosecurityextension": false,
+    "enrolleesuppliessubject": true,
+    "subjectaltrequireupn": false,
+    "subjectaltrequiredns": false,
+    "subjectaltrequiredomaindns": false,
+    "subjectaltrequireemail": false,
+    "subjectaltrequirespn": false,
+    "subjectrequireemail": false,
+    "ekus": [
+     "1.3.6.1.5.5.7.3.2"
+    ],
+    "certificateapplicationpolicy": [
+     "1.3.6.1.5.5.7.3.2"
+    ],
+    "certificatepolicy": [
+     "1.2.3.4"
+    ],
+    "authorizedsignatures": 0,
+    "applicationpolicies": [],
+    "issuancepolicies": [],
+    "effectiveekus": [
+     "1.3.6.1.5.5.7.3.2"
+    ],
+    "authenticationenabled": true,
+    "schannelauthenticationenabled": true
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002C-0000-4000-8000-00000000002C",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-519",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-513",
+     "PrincipalType": "Group",
+     "RightName": "Enroll",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-1105",
+     "PrincipalType": "User",
+     "RightName": "WritePKINameFlag",
+     "IsInherited": false
+    }
+   ]
+  },
+  {
+   "ObjectIdentifier": "00000037-0000-4000-8000-000000000037",
+   "Properties": {
+    "name": "WEBSERVER@CORP.LOCAL",
+    "domain": "CORP.LOCAL",
+    "domainsid": "S-1-5-21-1000-2000-3000",
+    "schemaversion": 1,
+    "requiresmanagerapproval": false,
+    "nosecurityextension": false,
+    "enrolleesuppliessubject": true,
+    "subjectaltrequireupn": false,
+    "subjectaltrequiredns": false,
+    "subjectaltrequiredomaindns": false,
+    "subjectaltrequireemail": false,
+    "subjectaltrequirespn": false,
+    "subjectrequireemail": false,
+    "ekus": [
+     "1.3.6.1.5.5.7.3.1"
+    ],
+    "certificateapplicationpolicy": [],
+    "certificatepolicy": [],
+    "authorizedsignatures": 0,
+    "applicationpolicies": [],
+    "issuancepolicies": [],
+    "effectiveekus": [
+     "1.3.6.1.5.5.7.3.1"
+    ],
+    "authenticationenabled": false,
+    "schannelauthenticationenabled": false
+   },
+   "ContainedBy": {
+    "ObjectIdentifier": "0000002C-0000-4000-8000-00000000002C",
+    "ObjectType": "Container"
+   },
+   "Aces": [
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-519",
+     "PrincipalType": "Group",
+     "RightName": "Owns",
+     "IsInherited": false
+    },
+    {
+     "PrincipalSID": "S-1-5-21-1000-2000-3000-513",
+     "PrincipalType": "Group",
+     "RightName": "Enroll",
+     "IsInherited": false
+    }
+   ]
+  }
+ ],
+ "meta": {
+  "methods": 0,
+  "type": "certtemplates",
+  "count": 2,
+  "version": 6
+ }
+}

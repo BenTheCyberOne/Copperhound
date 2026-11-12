@@ -23,7 +23,7 @@ container serves the web UI and REST API.
 
 **Documentation:** [User guide](docs/USER_GUIDE.md) · [Deployment](docs/DEPLOYMENT.md) ·
 [Data sources](docs/DATA.md) · [REST API](docs/API.md) · [CHQL](docs/CHQL.md) ·
-[Edge reference](docs/EDGES.md) · [Performance](docs/PERFORMANCE.md) ·
+[Edge reference](docs/EDGES.md) · [OT](docs/OT.md) · [Performance](docs/PERFORMANCE.md) ·
 [Architecture](docs/ARCHITECTURE.md)
 
 ## Quick start (Docker)
@@ -78,6 +78,9 @@ Computed in the background after every ingest:
   and remediation plans for each. In a zone's member review you certify the
   members that belong and revoke ones the rule picked up by mistake (they drop
   out of the zone); new matches show as pending.
+- **OT** — mark Purdue levels and add PLCs with `CanProgram` edges from an
+  asset inventory (OpenGraph), then use the OT zone templates and the OT / ICS
+  queries to find paths from IT into the plant: [docs/OT.md](docs/OT.md).
 - **Posture over time** — one snapshot per ingest (exposure %, findings by
   severity, per-finding counts) and a diff between any two snapshots listing
   exactly which finding items appeared or were resolved.
@@ -113,10 +116,10 @@ MATCH (dc)-[:MemberOf*0..]->(g:Group) WHERE g.objectid ENDS WITH '-516' WITH col
 On the command line: `copperhound query corp.chg "MATCH …"`. `days_ago(n)`
 gives relative timestamps, e.g. `WHERE u.lastlogontimestamp < days_ago(90)`.
 
-The UI ships with **159 prebuilt queries** in 15 categories (Domain
+The UI ships with **173 prebuilt queries** in 16 categories (Domain
 Information, Dangerous Privileges, Kerberos, Delegation, ACL Abuse, Sessions &
 Lateral Movement, GPO & OU, Hygiene, Shortest Paths, Tier Zero, Owned, ADCS,
-Azure / Entra ID, Azure Resources and Hybrid), each tagged and tested against a
+Azure / Entra ID, Azure Resources, Hybrid and OT / ICS), each tagged and tested against a
 synthetic graph. Your own queries can be saved server-side.
 
 ## Performance

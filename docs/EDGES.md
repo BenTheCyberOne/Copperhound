@@ -144,6 +144,7 @@ CHQL library entries:
 - Delegation: `coerce-to-tgt`, `coerce-to-tgt-non-tier0`
 - ACL Abuse: `add-self`, `add-to-tier0-groups`
 - Hybrid: `seamless-sso-targets`, `hybrid-groups`, `hybrid-group-roles`, `entra-connect`, `entra-connect-admins`, `sync-accounts`
+- OT / ICS: `ot-can-program`, `ot-paths-to-controllers`, `ot-paths-to-ews` and more ([OT.md](OT.md))
 
 Findings: `trust-sid-filtering`, `trust-tgt-delegation`, `coerce-to-tgt`,
 `az-hybrid-group-roles`, `entra-connect-admins`, `azureadssoacc`,
@@ -299,5 +300,11 @@ registered dynamically at ingest: traversable, with no help.
 | `SyncedToADGroup` | **no** | The Entra ID group is the synchronised copy of the target AD group. Membership is mastered on-premises, so this is informational and not traversable. | None by itself. | Informational. |
 | `SeamlessSSO` | yes | The AZUREADSSOACC computer account holds the Kerberos key Entra ID uses for Seamless SSO. The edge points to every synced Entra user of the account's AD domain. | With the account's NT hash or AES key (DCSync, or control of the object), forge a Kerberos service ticket for any synced user and exchange it at Entra ID for a sign-in as that user. | Treat AZUREADSSOACC as Tier Zero, roll its Kerberos decryption key regularly (Update-AzureADSSOForest), and disable Seamless SSO where it is not required. |
 | `EntraConnectCredentials` | yes | The source computer runs Entra Connect (AAD Connect) and stores the credentials of the target sync account: MSOL_* in AD (replication rights) or Sync_* in Entra ID (Directory Synchronization Accounts). | As local administrator of the server, decrypt the ADSync configuration (e.g. AADInternals Get-AADIntSyncCredentials) to obtain both accounts' passwords. | Treat the Entra Connect server as Tier Zero: restrict local administrators, keep it on a Tier Zero network segment, and monitor the ADSync database. |
+
+### OT
+
+| Edge | Traversable | Meaning | Abuse | Remediation |
+|---|---|---|---|---|
+| `CanProgram` | yes | The source can change the logic, configuration or firmware of the target controller (PLC, RTU, safety controller, drive): typically an engineering workstation running the vendor's programming software, or an account with programming rights in it. Not collected from AD; supplied as OpenGraph from an OT asset inventory (docs/OT.md). | Control of the source (local admin or a logon on the engineering workstation, or the programming account) lets an attacker download modified logic or firmware to the controller, change setpoints or stop the process (MITRE ATT&CK for ICS: Modify Controller Tasking, Program Download). | Limit which workstations and accounts can program each controller; keep engineering workstations out of IT administration (no IT admin groups as local admins, no IT admin logons), require the controller's key switch or password for downloads, and monitor program changes. |
 
 <!-- END GENERATED edge reference -->

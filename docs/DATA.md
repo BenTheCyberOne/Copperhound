@@ -160,6 +160,10 @@ CE uses:
   edge (counted as `name_edges_unresolved` in the ingest report).
 - `enabled: true` marks a node enabled; `Tag_Tier_Zero` (or `system_tags`
   containing `admin_tier_0`) marks it Tier Zero, `Tag_Owned` marks it owned.
+- A record without `name` (or `displayname`) keeps the collected object's name;
+  a new node without one is named by its id.
+- OT asset inventories use this format to add Purdue levels, controllers and
+  `CanProgram` edges: see [OT.md](OT.md).
 
 ## Importing multiple dumps
 

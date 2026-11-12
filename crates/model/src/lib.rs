@@ -290,7 +290,12 @@ pub const BUILTIN_EDGE_KINDS: &[(&str, bool)] = &[
     ("AZScopedTo", false),
     // ---- trust accounts (docs/EDGES.md, "Trusts") ----
     ("HasTrustKeys", true),
+    // ---- operational technology (docs/OT.md); supplied as OpenGraph ----
+    ("CanProgram", true),
 ];
+
+/// Edge kinds of the "OT" category (operational technology, docs/OT.md).
+pub const OT_EDGE_KINDS: &[&str] = &["CanProgram"];
 
 /// Edge kinds that link Active Directory and Entra ID objects. With unified
 /// Tier Zero switched off, traversals do not cross between the two realms.
@@ -308,6 +313,9 @@ pub fn edge_category(name: &str) -> &'static str {
     let first = |n: &str| builtin_edge_kind(n).unwrap_or(u16::MAX);
     if HYBRID_EDGE_KINDS.contains(&name) {
         return "Hybrid";
+    }
+    if OT_EDGE_KINDS.contains(&name) {
+        return "OT";
     }
     if matches!(name, "SameForestTrust" | "CrossForestTrust" | "SpoofSIDHistory" | "AbuseTGTDelegation" | "HasTrustKeys") {
         return "Active Directory";
@@ -478,6 +486,7 @@ mod tests {
         assert_eq!(edge_category("SameForestTrust"), "Active Directory");
         assert_eq!(edge_category("SeamlessSSO"), "Hybrid");
         assert_eq!(edge_category("SyncedToEntraGroup"), "Hybrid");
+        assert_eq!(edge_category("CanProgram"), "OT");
         assert_eq!(node_category(NodeKind::AzVm), "Azure");
         assert_eq!(node_category(NodeKind::RootCa), "ADCS");
     }

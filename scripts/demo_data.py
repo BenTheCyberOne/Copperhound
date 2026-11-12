@@ -17,8 +17,16 @@ show:
 * Entra ID: synchronised users, a Global Administrator who is also on-prem,
   an app registration owned by a regular user with a privileged role.
 
+With --ot it adds a production site (docs/OT.md): a Plant OU with a jump
+host, historians, engineering workstations and HMIs, plus an OpenGraph asset
+inventory that sets their Purdue levels and adds PLCs with CanProgram edges.
+Its weaknesses: IT-WorkstationAdmins (the helpdesk) are local admins on an
+engineering workstation, a Domain Admin is logged on to the historian,
+Domain Users can RDP to an HMI, and legacy Windows without LAPS.
+
     python scripts/demo_data.py demo/                # current state (November)
     python scripts/demo_data.py demo-aug/ --stage 1  # August: before any fixes
+    python scripts/demo_data.py demo-ot/ --ot        # with the OT site
 
 Stages 1-4 are monthly collections (August to November) in which the
 weaknesses get fixed one batch at a time: ESC1 in September, the Domain Users
@@ -493,6 +501,82 @@ class Env:
                 {"principalId": ids[p], "roleDefinitionId": rid, "directoryScopeId": "/"} for p in principals]}})
         return items
 
+    # ---- operational technology (--ot)
+    def build_ot(self):
+        r = random.Random(self.r.random())  # own sequence: default output unchanged
+        g = self.by_name
+        plant = self.ou("Plant", desc="Production site: OT servers, engineering workstations and HMIs")
+        dcomp, du = g["domain computers"], g["domain users"]
+        engineers = [self.user(sam, name, plant, title="Controls Engineer", department="Operations",
+                               distinguishedname=f"CN={name},OU=Plant,DC=HOLLOWBROOK,DC=LOCAL")
+                     for sam, name in [("rkeller", "Rosa Keller"), ("tbaptiste", "Theo Baptiste"), ("anovak", "Anika Novak")]]
+        operators = [self.user(f"op.line{i}", f"Line {i} Operator", plant, title="Shared operator logon",
+                               department="Operations", pwdneverexpires=True,
+                               distinguishedname=f"CN=Line {i} Operator,OU=Plant,DC=HOLLOWBROOK,DC=LOCAL")
+                     for i in (1, 2)]
+        vendor = self.user("vnd.rockfield", "Rockfield Automation (vendor)", plant, pwdneverexpires=True,
+                           title="Vendor remote support", lastlogontimestamp=self.ago(150, 220),
+                           pwdlastset=self.ago(1100, 1400), description="Integrator support account - enable on request",
+                           distinguishedname="CN=Rockfield Automation (vendor),OU=Plant,DC=HOLLOWBROOK,DC=LOCAL")
+        ot_eng = self.group("OT-Engineers", engineers, ou=plant, desc="Program PLCs, administer EWS and HMIs")
+        ot_ops = self.group("OT-Operators", operators, ou=plant, desc="Operate the HMIs")
+        ot_vendor = self.group("OT-VendorRemote", [vendor], ou=plant, desc="Vendor access via the OT jump host")
+        hosts = {}
+        for name, os_name, level, role, extra in [
+            ("OT-JUMP01", "Windows Server 2019 Standard", 3.5, "JumpHost", {}),
+            ("OT-HISTDMZ", "Windows Server 2019 Standard", 3.5, "Historian", {"description": "Historian replica for business reporting"}),
+            ("OT-HIST01", "Windows Server 2016 Standard", 3, "Historian", {}),
+            ("OT-SCADA01", "Windows Server 2012 R2 Standard", 3, "SCADA", {"haslaps": False}),
+            ("OT-EWS01", "Windows 10 Enterprise LTSC", 2, "EWS", {"haslaps": False}),
+            ("OT-EWS02", "Windows 7 Professional", 2, "EWS", {"haslaps": False, "description": "Legacy PLC programming suite"}),
+            ("OT-HMI01", "Windows 10 IoT Enterprise", 2, "HMI", {"haslaps": False}),
+            ("OT-HMI02", "Windows 10 IoT Enterprise", 2, "HMI", {"haslaps": False}),
+            ("OT-HMI03", "Windows Embedded Standard 7", 2, "HMI", {"haslaps": False}),
+        ]:
+            c = self.computer(name, plant, os_name, **extra)
+            hosts[name] = (c, level, role)
+            self.add_member(dcomp, c)
+        for c, _, _ in hosts.values():
+            self.local(c, "LocalAdmins", ot_eng)
+            self.local(c, "LocalAdmins", self.da)
+        h = {n: v[0] for n, v in hosts.items()}
+        for n in ("OT-HMI01", "OT-HMI02", "OT-HMI03"):
+            self.local(h[n], "RemoteDesktopUsers", ot_ops)
+        self.local(h["OT-JUMP01"], "RemoteDesktopUsers", ot_vendor)
+        self.local(h["OT-JUMP01"], "RemoteDesktopUsers", ot_eng)
+        # weaknesses
+        self.local(h["OT-EWS01"], "LocalAdmins", g["it-workstationadmins"])  # the workstation GPO also hit the EWS
+        self.local(h["OT-HMI01"], "RemoteDesktopUsers", du)
+        self.session(h["OT-HIST01"], self.da_accounts[0])
+        for e, n in zip(engineers, ("OT-EWS01", "OT-EWS02", "OT-JUMP01")):
+            self.session(h[n], e)
+        for i, o in enumerate(operators):
+            self.session(h[f"OT-HMI0{i + 1}"], o)
+
+        # OpenGraph asset inventory: Purdue levels and roles of the AD hosts,
+        # the controllers, and what can program them.
+        nodes = [{"id": c["ObjectIdentifier"], "kinds": ["Computer"],
+                  "properties": {"purdue_level": level, "ot_role": role, "site": "Hollowbrook Mill"}}
+                 for c, level, role in hosts.values()]
+        for u in engineers + operators + [vendor]:
+            nodes.append({"id": u["ObjectIdentifier"], "kinds": ["User"],
+                          "properties": {"ot_role": "Vendor" if u is vendor else "OTUser"}})
+        devices = [("PLC-LINE1", "PLC", "PLC", 1, "Line 1 packaging"), ("PLC-LINE2", "PLC", "PLC", 1, "Line 2 packaging"),
+                   ("PLC-BOILER", "PLC", "PLC", 1, "Boiler house"),
+                   ("SIS-BOILER", "PLC", "SIS", 1, "Boiler safety instrumented system"),
+                   ("DRIVE-L1-01", "OTDevice", "Drive", 0, "Line 1 conveyor drive")]
+        for name, kind, role, level, desc in devices:
+            nodes.append({"id": f"ot-{name.lower()}", "kinds": [kind],
+                          "properties": {"name": name, "purdue_level": level, "ot_role": role, "description": desc,
+                                         "vendor": "Fabricated Controls",
+                                         "firmware": f"{r.randint(2, 4)}.{r.randint(0, 9)}.{r.randint(0, 20)}",
+                                         "site": "Hollowbrook Mill"}})
+        ids = {**{n: c["ObjectIdentifier"] for n, c in h.items()}, **{d[0]: f"ot-{d[0].lower()}" for d in devices}}
+        prog = [("OT-EWS01", "PLC-LINE1"), ("OT-EWS01", "PLC-LINE2"), ("OT-EWS01", "PLC-BOILER"),
+                ("OT-EWS02", "SIS-BOILER"), ("PLC-LINE1", "DRIVE-L1-01")]
+        edges = [{"kind": "CanProgram", "start": {"value": ids[a]}, "end": {"value": ids[b]}} for a, b in prog]
+        self.ot_graph = {"metadata": {"source_kind": "OTInventory"}, "graph": {"nodes": nodes, "edges": edges}}
+
     # ---- output
     def write(self, out):
         os.makedirs(out, exist_ok=True)
@@ -520,6 +604,9 @@ class Env:
         dump("rootcas", [self.rootca])
         dump("aiacas", [self.aiaca])
         dump("ntauthstores", [self.ntauth])
+        if getattr(self, "ot_graph", None):
+            with open(os.path.join(out, f"{stamp}_ot_inventory.json"), "w", encoding="utf-8") as f:
+                json.dump(self.ot_graph, f, separators=(",", ":"))
         az = self.azure()
         with open(os.path.join(out, f"{stamp}_azurehound.json"), "w", encoding="utf-8") as f:
             json.dump({"data": az, "meta": {"methods": 0, "type": "azure", "count": len(az), "version": 5}}, f, separators=(",", ":"))
@@ -533,12 +620,15 @@ def main():
     ap.add_argument("--stage", type=int, choices=[1, 2, 3, 4], default=4,
                     help="1 = August (before fixes) ... 4 = November (current)")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--ot", action="store_true", help="add a production site with OT assets (docs/OT.md)")
     ap.add_argument("--now", type=int, default=None, help="Unix time the timestamps are relative to (default: now)")
     a = ap.parse_args()
     now = a.now or int(time.time())
     now -= (4 - a.stage) * 30 * DAY
     env = Env(a.stage, now, a.seed)
     env.build()
+    if a.ot:
+        env.build_ot()
     env.write(a.out)
 
 

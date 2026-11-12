@@ -615,4 +615,9 @@ export const EDGE_HELP: Record<string, EdgeHelp> = {
     abuse: "With administrative access to a DC of the source domain, dump the trust key (mimikatz lsadump::trust /patch, the [ Out ] key) and request a TGT as the trust account in the target domain with its RC4 key. This gives an authenticated foothold in the trusted domain (Kerberos network logons only).",
     remediation: "Treat every domain that trusts another as able to authenticate into it; protect DCs of trusting domains as Tier Zero, rotate trust keys after compromise (netdom trust /resetOneSide) and alert on logons by trust accounts (event 4768 / 4624).",
   },
+  CanProgram: {
+    description: "The source can change the logic, configuration or firmware of the target controller (PLC, RTU, safety controller, drive): typically an engineering workstation running the vendor's programming software, or an account with programming rights in it. Not collected from AD; supplied as OpenGraph from an OT asset inventory (docs/OT.md).",
+    abuse: "Control of the source (local admin or a logon on the engineering workstation, or the programming account) lets an attacker download modified logic or firmware to the controller, change setpoints or stop the process (MITRE ATT&CK for ICS: Modify Controller Tasking, Program Download).",
+    remediation: "Limit which workstations and accounts can program each controller; keep engineering workstations out of IT administration (no IT admin groups as local admins, no IT admin logons), require the controller's key switch or password for downloads, and monitor program changes.",
+  },
 };

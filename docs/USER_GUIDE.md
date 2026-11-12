@@ -103,7 +103,7 @@ On the canvas:
 
 CHQL is a read-only Cypher dialect, so most BloodHound CE queries run unchanged. Queries
 returning paths draw on the canvas; others return a table you can export as CSV. The
-library has 159 prebuilt queries, searchable and filterable by tag. Save your own with
+library has 173 prebuilt queries, searchable and filterable by tag. Save your own with
 **Save…** (they are stored on the server). Reference: [CHQL.md](CHQL.md).
 
 ## Object filter
@@ -150,7 +150,8 @@ Open a finding to see its items, guidance and history across snapshots. From the
 **Zones** are target sets beyond Tier Zero, such as "Finance file servers" or "Tier 1
 servers", defined by a CHQL selector. Each zone gets its own exposure, choke points and
 plan. On the **Review** tab, certify the members that belong and revoke the ones the rule
-picked up by mistake; revoked members leave the zone.
+picked up by mistake; revoked members leave the zone. **Start from a template** offers
+OT zones (Purdue levels, engineering workstations, OT DMZ); see [OT.md](OT.md).
 
 ## Posture and alerts
 

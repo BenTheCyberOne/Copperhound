@@ -163,7 +163,10 @@ pub fn extract(f: File, em: &mut Emitter) {
         let str_prop = |key: &str| {
             p.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).and_then(|(_, v)| v.as_str()).map(str::trim).filter(|s| !s.is_empty())
         };
-        let name = str_prop("name").or_else(|| str_prop("displayname")).unwrap_or(id).to_string();
+        // Without a name the id is only a fallback: an enrichment record
+        // (built-in kind, same id as a collected object) must not replace
+        // the collected name.
+        let name = str_prop("name").or_else(|| str_prop("displayname")).map(str::to_string);
         let props = em.keep_props().then(|| {
             let mut m = n.properties.clone();
             let mut kinds: Vec<Value> = n.kinds.iter().map(|k| Value::String(k.trim().to_string())).collect();
@@ -175,7 +178,10 @@ pub fn extract(f: File, em: &mut Emitter) {
             m.insert("kinds".into(), Value::Array(kinds));
             Value::Object(m).to_string().into_boxed_str()
         });
-        em.own_raw(id, kind, Some(&name), fl, props);
+        em.own_raw(id, kind, name.as_deref(), fl, props);
+        if name.is_none() {
+            em.hint_named(id, ch_model::NodeKind::Unknown, Some(id));
+        }
     }
     for (i, e) in f.graph.edges.into_iter().enumerate() {
         let kind = e.kind.trim();

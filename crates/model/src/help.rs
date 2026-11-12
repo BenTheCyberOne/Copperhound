@@ -646,6 +646,11 @@ pub fn edge_help(name: &str) -> Option<EdgeHelp> {
             "None by itself. Holders of the scoped role (AZHasRole to the source) act on the scope's objects; for an administrative unit, on its members (not modelled).",
             "Review scoped assignments like tenant-wide ones; keep privileged users out of administrative units managed by lower-tier administrators, or use restricted management administrative units.",
         ),
+        "CanProgram" => h(
+            "The source can change the logic, configuration or firmware of the target controller (PLC, RTU, safety controller, drive): typically an engineering workstation running the vendor's programming software, or an account with programming rights in it. Not collected from AD; supplied as OpenGraph from an OT asset inventory (docs/OT.md).",
+            "Control of the source (local admin or a logon on the engineering workstation, or the programming account) lets an attacker download modified logic or firmware to the controller, change setpoints or stop the process (MITRE ATT&CK for ICS: Modify Controller Tasking, Program Download).",
+            "Limit which workstations and accounts can program each controller; keep engineering workstations out of IT administration (no IT admin groups as local admins, no IT admin logons), require the controller's key switch or password for downloads, and monitor program changes.",
+        ),
         _ => None,
     }
 }
@@ -659,7 +664,7 @@ mod generated {
     use std::fmt::Write;
     use std::path::PathBuf;
 
-    pub const CATEGORIES: &[&str] = &["Active Directory", "ADCS", "Azure", "Hybrid"];
+    pub const CATEGORIES: &[&str] = &["Active Directory", "ADCS", "Azure", "Hybrid", "OT"];
     pub const MD_BEGIN: &str = "<!-- BEGIN GENERATED edge reference: edit crates/model/src/help.rs, then run `CH_BLESS=1 cargo test -p ch-model` -->";
     pub const MD_END: &str = "<!-- END GENERATED edge reference -->";
 

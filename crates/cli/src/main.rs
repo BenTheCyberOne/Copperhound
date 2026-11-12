@@ -274,7 +274,7 @@ fn main() -> Result<()> {
                     eprintln!("results differ (expected only if LIMIT cut a larger result without ORDER BY)");
                 }
             }
-            let named = |id: u32| serde_json::json!({"id": id, "name": g.name(id), "kind": g.kind(id).as_str()});
+            let named = |id: u32| serde_json::json!({"id": id, "name": g.name(id), "kind": g.kind_name(id)});
             let out = serde_json::json!({
                 "nodes": r.nodes.iter().map(|&n| named(n)).collect::<Vec<_>>(),
                 "edges": r.edges.iter().map(|e| serde_json::json!({"src": g.name(e.0), "dst": g.name(e.1), "kind": g.edge_kind_name(e.2)})).collect::<Vec<_>>(),
@@ -324,7 +324,7 @@ fn main() -> Result<()> {
                     "  {:>2}. sever {} ({}): cuts {} principals → {} exposed ({:.1}% total cut)",
                     i + 1,
                     g.name(s.node),
-                    g.kind(s.node).as_str(),
+                    g.kind_name(s.node),
                     num(s.principals_cut),
                     num(s.exposed_after),
                     s.cumulative_reduction_percent
@@ -501,7 +501,7 @@ fn main() -> Result<()> {
                 }
             }
             for id in hits.iter().take(limit) {
-                println!("  {id:>10}  {} ({})", g.name(id), g.kind(id).as_str());
+                println!("  {id:>10}  {} ({})", g.name(id), g.kind_name(id));
             }
             Ok(())
         }
@@ -524,7 +524,7 @@ fn main() -> Result<()> {
             }
             println!("search     {}", latency(&mut times));
             for id in ids {
-                println!("  {id:>10}  {} ({})", g.name(id), g.kind(id).as_str());
+                println!("  {id:>10}  {} ({})", g.name(id), g.kind_name(id));
             }
             Ok(())
         }
@@ -627,7 +627,7 @@ fn resolve(g: &Graph, q: &str) -> Result<u32> {
 }
 
 fn label(g: &Graph, id: u32) -> String {
-    let mut s = format!("{} ({})", g.name(id), g.kind(id).as_str());
+    let mut s = format!("{} ({})", g.name(id), g.kind_name(id));
     if g.has_flag(id, flags::TIER0) {
         s.push_str(" [T0]");
     }
@@ -798,9 +798,9 @@ fn tier0(graph: &Path, top: usize, json: bool, fa: &FilterArgs) -> Result<()> {
             .iter()
             .map(|c| {
                 serde_json::json!({
-                    "src": g.name(c.src), "src_kind": g.kind(c.src).as_str(),
+                    "src": g.name(c.src), "src_kind": g.kind_name(c.src),
                     "edge": g.edge_kind_name(c.kind),
-                    "dst": g.name(c.dst), "dst_kind": g.kind(c.dst).as_str(),
+                    "dst": g.name(c.dst), "dst_kind": g.kind_name(c.dst),
                     "principals_routed": c.flow,
                 })
             })

@@ -51,6 +51,8 @@ fn fixture(d: &std::path::Path) {
                 {"id": "gh-repo-3", "kinds": ["GHRepository"], "properties": {"name": "dup"}},
                 // A built-in kind: merges with the SharpHound record of the same id.
                 {"id": format!("{D}-1104"), "kinds": ["User"], "properties": {"name": "ALICE@CORP.LOCAL", "githubid": "alice-gh"}},
+                // A new node without a name is named by its id.
+                {"id": "gh-anon", "kinds": ["GHUser"], "properties": {}},
                 {"kinds": ["GHUser"], "properties": {"name": "no id"}}
             ],
             "edges": [
@@ -68,6 +70,12 @@ fn fixture(d: &std::path::Path) {
         }
     });
     fs::write(d.join("github.json"), og.to_string()).unwrap();
+    // Enrichment without a name keeps the collected name, also when it is
+    // read after the collected record (files are read in name order).
+    let enrich = json!({"graph": {"nodes": [
+        {"id": format!("{D}-512"), "kinds": ["Group"], "properties": {"purdue_level": 4}}
+    ]}});
+    fs::write(d.join("zz_enrich.json"), enrich.to_string()).unwrap();
 }
 
 #[test]
@@ -94,6 +102,10 @@ fn opengraph_custom_kinds_and_edges() {
     assert!(g.has_flag(org, flags::TIER0), "Tag_Tier_Zero");
     assert!(g.props(repo).contains("\"kinds\":[\"GHRepository\",\"GitHub\"]"), "{}", g.props(repo));
     assert!(g.props(alice).contains("githubid"), "OpenGraph properties merge into the AD user: {}", g.props(alice));
+    let da = id(&format!("{D}-512"));
+    assert_eq!(g.name(da), "DOMAIN ADMINS@CORP.LOCAL", "a nameless enrichment record keeps the collected name");
+    assert!(g.props(da).contains("purdue_level"), "{}", g.props(da));
+    assert_eq!(g.name(id("gh-anon")), "GH-ANON");
 
     assert!(has_edge(g, gu, org, "GHOwns"));
     assert!(has_edge(g, gu, repo, "GHCanPush"), "name-matched edge");
@@ -115,7 +127,7 @@ fn opengraph_custom_kinds_and_edges() {
     let r = ch_query::run_with(g, "MATCH (u:User)-[:GHLinkedAccount]->(a:GHUser)-[:GHCanPush]->(x) RETURN x.name", 100, &cancel).unwrap();
     assert_eq!(r.rows, vec![vec![json!("INFRA")]]);
     let r = ch_query::run_with(g, "MATCH (n) WHERE n.kind = 'GHUser' RETURN count(n)", 100, &cancel).unwrap();
-    assert_eq!(r.rows, vec![vec![json!(1)]]);
+    assert_eq!(r.rows, vec![vec![json!(2)]]);
     assert!(ch_query::run_with(g, "MATCH (n:NoSuchKind) RETURN n", 10, &cancel).is_err());
     assert!(ch_query::parse_syntax("MATCH (n:NoSuchKind) RETURN n").is_ok());
 

@@ -214,7 +214,7 @@ export interface SavedQuery {
   updated_at: string;
 }
 
-export const KIND_CATEGORIES = ["Active Directory", "ADCS", "Azure", "Hybrid", "Custom", "Other"] as const;
+export const KIND_CATEGORIES = ["Active Directory", "ADCS", "Azure", "Hybrid", "OT", "Custom", "Other"] as const;
 export type KindCategory = (typeof KIND_CATEGORIES)[number];
 
 /** Curated help for derived / hybrid / trust edge kinds (GET /edge-kinds, v1.4). */

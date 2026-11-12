@@ -352,6 +352,7 @@ const HYBRID_EDGES = new Set([
 
 export function edgeCategory(kind: string): KindCategory {
   if (HYBRID_EDGES.has(kind)) return "Hybrid";
+  if (kind === "CanProgram") return "OT";
   if (ADCS_EDGES.has(kind)) return "ADCS";
   return kind.startsWith("AZ") ? "Azure" : "Active Directory";
 }

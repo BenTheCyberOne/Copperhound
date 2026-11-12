@@ -4,6 +4,41 @@ import type { Zone } from "../../api/types";
 import { Modal } from "../../components/Modal";
 import { ErrorExcerpt } from "../../tabs/queries/QueryEditor";
 
+/** Starting points for common zones. The OT ones use the `purdue_level` and
+ *  `ot_role` properties of docs/OT.md, set by an OpenGraph asset inventory. */
+const TEMPLATES: { name: string; description: string; selector: string }[] = [
+  {
+    name: "OT assets (Purdue 0-3)",
+    description: "Control systems below the OT DMZ",
+    selector: "MATCH (n) WHERE n.purdue_level <= 3 RETURN n",
+  },
+  {
+    name: "Controllers (Purdue 0-1)",
+    description: "PLCs, safety systems, RTUs and field devices",
+    selector: "MATCH (n) WHERE n.purdue_level <= 1 RETURN n",
+  },
+  {
+    name: "Engineering workstations",
+    description: "Hosts that can program controllers",
+    selector: "MATCH (n) WHERE n.ot_role = 'EWS' RETURN n",
+  },
+  {
+    name: "OT DMZ (Purdue 3.5)",
+    description: "Jump hosts, historian replicas and patch servers between IT and OT",
+    selector: "MATCH (n) WHERE n.purdue_level = 3.5 RETURN n",
+  },
+  {
+    name: "OT organizational unit",
+    description: "Everything under the OT OU (edit the distinguished name)",
+    selector: "MATCH (n) WHERE n.distinguishedname ENDS WITH ',OU=PLANT,DC=CORP,DC=LOCAL' RETURN n",
+  },
+  {
+    name: "OT domain",
+    description: "Every object of a separate OT domain (edit the domain name)",
+    selector: "MATCH (n) WHERE n.domain = 'OT.CORP.LOCAL' RETURN n",
+  },
+];
+
 interface Props {
   editing: Zone | null;
   onClose: () => void;
@@ -36,6 +71,29 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
   return (
     <Modal title={editing ? `Edit zone “${editing.name}”` : "New zone"} onClose={onClose}>
       <form className="form-stack" onSubmit={(e) => void submit(e)}>
+        {!editing && (
+          <label>
+            Start from a template
+            <select
+              value=""
+              onChange={(e) => {
+                const t = TEMPLATES[Number(e.target.value)];
+                if (!t) return;
+                setName(t.name);
+                setDescription(t.description);
+                setSelector(t.selector);
+                setError(null);
+              }}
+            >
+              <option value="">Choose…</option>
+              {TEMPLATES.map((t, i) => (
+                <option key={t.name} value={i}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />

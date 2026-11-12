@@ -83,6 +83,15 @@ fn pct(a: u64, b: u64) -> f64 {
     }
 }
 
+/// " to OT controllers" for impact measured against another target than Tier Zero.
+fn target_suffix(target: &str) -> String {
+    if target == crate::findings::TIER0_LABEL {
+        String::new()
+    } else {
+        format!(" to {target}")
+    }
+}
+
 /// Letter grade and the rule that produced it.
 pub fn grade(exposure_percent: f64, critical: usize, high: usize) -> (char, &'static str) {
     if exposure_percent >= 50.0 || critical >= 3 {
@@ -243,7 +252,12 @@ pub fn render_html(r: &ReportInput) -> String {
         sm.by_sev[3]
     );
     let _ = write!(h, "<p>Grade {}: {}.</p>", sm.grade.0, sm.grade.1);
-    let mut top: Vec<&FindingResult> = r.findings.iter().filter(|f| f.exposure.as_ref().is_some_and(|e| e.principals_cut > 0)).collect();
+    // Tier Zero impact only: other targets (OT controllers) are not comparable.
+    let mut top: Vec<&FindingResult> = r
+        .findings
+        .iter()
+        .filter(|f| f.exposure.as_ref().is_some_and(|e| e.principals_cut > 0 && e.target == crate::findings::TIER0_LABEL))
+        .collect();
     top.sort_by(|a, b| {
         let (x, y) = (a.exposure.as_ref().map_or(0, |e| e.principals_cut), b.exposure.as_ref().map_or(0, |e| e.principals_cut));
         y.cmp(&x)
@@ -281,7 +295,7 @@ pub fn render_html(r: &ReportInput) -> String {
             let impact = f
                 .exposure
                 .as_ref()
-                .map(|e| format!("{:.1}% <span class=\"muted\">({})</span>", e.percent_of_exposed, num(e.principals_cut)))
+                .map(|e| format!("{:.1}% <span class=\"muted\">({}){}</span>", e.percent_of_exposed, num(e.principals_cut), target_suffix(e.target)))
                 .unwrap_or_else(|| "—".into());
             let _ = write!(
                 h,
@@ -439,7 +453,11 @@ pub fn render_markdown(r: &ReportInput) -> String {
     }
     let _ = writeln!(m, "\n## Findings\n\n| Severity | Finding | Category | Items | Fix removes |\n|---|---|---|---:|---:|");
     for f in r.findings {
-        let impact = f.exposure.as_ref().map(|e| format!("{:.1}% ({})", e.percent_of_exposed, num(e.principals_cut))).unwrap_or_else(|| "—".into());
+        let impact = f
+            .exposure
+            .as_ref()
+            .map(|e| format!("{:.1}% ({}){}", e.percent_of_exposed, num(e.principals_cut), target_suffix(e.target)))
+            .unwrap_or_else(|| "—".into());
         let _ = writeln!(m, "| {} | {} | {} | {} | {} |", sev_str(f.def.severity), md_cell(f.def.title), md_cell(f.def.category), num(f.items.len() as u64), impact);
     }
     if let Some(p) = r.plan.filter(|p| !p.steps.is_empty()) {

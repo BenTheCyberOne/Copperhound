@@ -561,6 +561,8 @@ class Env:
         for u in engineers + operators + [vendor]:
             nodes.append({"id": u["ObjectIdentifier"], "kinds": ["User"],
                           "properties": {"ot_role": "Vendor" if u is vendor else "OTUser"}})
+        for grp, role in ((ot_eng, "OTGroup"), (ot_ops, "OTGroup"), (ot_vendor, "Vendor")):
+            nodes.append({"id": grp["ObjectIdentifier"], "kinds": ["Group"], "properties": {"ot_role": role}})
         devices = [("PLC-LINE1", "PLC", "PLC", 1, "Line 1 packaging"), ("PLC-LINE2", "PLC", "PLC", 1, "Line 2 packaging"),
                    ("PLC-BOILER", "PLC", "PLC", 1, "Boiler house"),
                    ("SIS-BOILER", "PLC", "SIS", 1, "Boiler safety instrumented system"),

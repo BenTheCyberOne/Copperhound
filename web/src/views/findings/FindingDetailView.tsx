@@ -134,8 +134,8 @@ export function FindingDetailView({ id }: { id: string }) {
             {f.exposure && (
               <div className="stat stat-wide">
                 <span className="stat-value">{f.exposure.principals_cut.toLocaleString()}</span>
-                <span className="stat-label">principals would lose every path to Tier Zero if fixed</span>
-                <ImpactBar cut={f.exposure.principals_cut} percent={f.exposure.percent_of_exposed} />
+                <span className="stat-label">principals would lose every path to {f.exposure.target} if fixed</span>
+                <ImpactBar cut={f.exposure.principals_cut} percent={f.exposure.percent_of_exposed} target={f.exposure.target} />
               </div>
             )}
           </div>

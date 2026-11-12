@@ -111,6 +111,26 @@ The **OT / ICS** category in the query library:
 | `ot-no-laps` | level 0–3 computers without LAPS |
 | `ot-unconstrained` | unconstrained delegation at level 0–3 |
 
+## Findings
+
+The OT findings run with every analysis. With no OT data they find nothing. A
+principal counts as IT when it has neither `purdue_level` nor `ot_role`, so mark
+OT accounts and groups too, e.g. `"ot_role": "OTGroup"`. Their impact is
+measured against **OT controllers** (Purdue level 0–1) instead of Tier Zero:
+"fixing this removes N principals' paths to OT controllers".
+
+| Finding | Severity | Items |
+|---|---|---|
+| IT principals can access engineering workstations | Critical | AdminTo, CanRDP, CanPSRemote or ExecuteDCOM held by IT principals (not Tier Zero) on hosts with `ot_role` EWS or a `CanProgram` edge |
+| IT principals can access OT hosts | High | the same rights on other Purdue level 0–3 computers |
+| Legacy Windows in OT | Medium | enabled level 0–3 computers on XP / Vista / 7 / Embedded 7 / Server 2003–2012 R2 |
+| OT hosts without LAPS | Medium | enabled level 0–3 computers without LAPS |
+| Enabled vendor accounts | Medium | enabled users with `ot_role` Vendor |
+
+The MITRE references are ATT&CK for ICS techniques: T0886 Remote Services,
+T0843 Program Download, T0859 Valid Accounts, T0866 Exploitation of Remote
+Services, T0822 External Remote Services.
+
 ## Demo
 
 ```sh
@@ -134,6 +154,5 @@ has these weaknesses:
   path through `AdminTo` assumes the network allows the connection. Read OT
   paths as "the identity allows it". Check the conduit rules before you rank a
   path as exploitable.
-- **OT findings.** These queries do not yet appear as measured findings.
 - **Fix cost.** The remediation planner does not weigh how hard a fix is,
   such as a reboot window or a vendor-certified configuration.

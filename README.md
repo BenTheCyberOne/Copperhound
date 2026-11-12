@@ -54,8 +54,8 @@ and single sign-on (OpenID Connect, SAML 2.0): [docs/DEPLOYMENT.md](docs/DEPLOYM
 
 Computed in the background after every ingest:
 
-- **Attack-path findings** — 30 finding types across AD, ADCS, Entra ID and
-  hybrid (DCSync outside Tier Zero, control of Tier Zero, rights of broad groups,
+- **Attack-path findings** — 42 finding types across AD, ADCS, Entra ID,
+  hybrid and OT (DCSync outside Tier Zero, control of Tier Zero, rights of broad groups,
   delegation to Tier Zero, ESC escalations, tenant-takeover Graph permissions,
   synced accounts holding Entra Tier Zero roles, …), each with severity,
   impact, remediation guidance and MITRE ATT&CK techniques. Every edge finding

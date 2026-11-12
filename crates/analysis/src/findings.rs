@@ -43,18 +43,41 @@ pub struct FindingDef {
     /// Edges whose removal measures the impact, when they differ from the
     /// reported items (e.g. permissions whose risk lives in derived edges).
     pub impact_query: Option<&'static str>,
+    /// Target set the impact is measured against; `None` is Tier Zero.
+    pub target: Option<Target>,
 }
+
+/// A target set other than Tier Zero for measuring a finding's impact.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Target {
+    /// Shown as "principals would lose every path to <label>".
+    pub label: &'static str,
+    /// CHQL returning the target nodes.
+    pub selector: &'static str,
+}
+
+/// Purdue level 0-1 assets (docs/OT.md).
+pub const OT_CONTROLLERS: Target =
+    Target { label: "OT controllers", selector: "MATCH (n) WHERE n.purdue_level <= 1 RETURN n" };
+
+/// Label of the default target.
+pub const TIER0_LABEL: &str = "Tier Zero";
 
 macro_rules! f {
     ($id:literal, $sev:ident, $cat:literal, $kind:ident, $title:literal, [$($m:literal),*], $q:literal,
      desc: $d:literal, impact: $i:literal, fix: $r:literal) => {
         FindingDef { id: $id, title: $title, severity: Severity::$sev, category: $cat, kind: ItemKind::$kind,
-                     description: $d, impact: $i, remediation: $r, mitre: &[$($m),*], query: $q, impact_query: None }
+                     description: $d, impact: $i, remediation: $r, mitre: &[$($m),*], query: $q, impact_query: None, target: None }
+    };
+    ($id:literal, $sev:ident, $cat:literal, $kind:ident, $title:literal, [$($m:literal),*], $q:literal, target: $t:expr,
+     desc: $d:literal, impact: $i:literal, fix: $r:literal) => {
+        FindingDef { id: $id, title: $title, severity: Severity::$sev, category: $cat, kind: ItemKind::$kind,
+                     description: $d, impact: $i, remediation: $r, mitre: &[$($m),*], query: $q, impact_query: None, target: Some($t) }
     };
     ($id:literal, $sev:ident, $cat:literal, $kind:ident, $title:literal, [$($m:literal),*], $q:literal, measure: $iq:literal,
      desc: $d:literal, impact: $i:literal, fix: $r:literal) => {
         FindingDef { id: $id, title: $title, severity: Severity::$sev, category: $cat, kind: ItemKind::$kind,
-                     description: $d, impact: $i, remediation: $r, mitre: &[$($m),*], query: $q, impact_query: Some($iq) }
+                     description: $d, impact: $i, remediation: $r, mitre: &[$($m),*], query: $q, impact_query: Some($iq), target: None }
     };
 }
 
@@ -250,12 +273,44 @@ pub const CATALOG: &[FindingDef] = &[
        desc: "Disabled accounts keep their directory role assignments.",
        impact: "Re-enabling the account (or a sync mistake) restores privileged access silently.",
        fix: "Remove role assignments when accounts are disabled; automate in the leaver process."),
+    // ------------------------------------------------------------ OT (docs/OT.md)
+    // IT principals: no purdue_level and no ot_role. Impact is measured
+    // against OT controllers (Purdue level 0-1), not Tier Zero.
+    f!("ot-ews-it-access", Critical, "OT", Edges, "IT principals can access engineering workstations", ["T0886", "T0843"],
+       "MATCH (p)-[r:AdminTo|CanRDP|CanPSRemote|ExecuteDCOM]->(c:Computer) WHERE (c.ot_role = 'EWS' OR (c)-[:CanProgram]->()) AND p.purdue_level IS NULL AND p.ot_role IS NULL AND NOT p.tier0 RETURN r",
+       target: OT_CONTROLLERS,
+       desc: "Principals not marked as OT (no purdue_level or ot_role) and not Tier Zero hold local admin or remote logon rights on engineering workstations.",
+       impact: "Engineering workstations can program controllers. Whoever compromises one of these IT principals can log on to the workstation and download modified logic or firmware to the PLCs it manages.",
+       fix: "Remove IT groups from the local Administrators, Remote Desktop Users and Distributed COM / Remote Management Users groups of engineering workstations (check GPOs and restricted groups that target them). Administer them with dedicated OT accounts from the OT jump host."),
+    f!("ot-it-remote-access", High, "OT", Edges, "IT principals can access OT hosts", ["T0886", "T0859"],
+       "MATCH (p)-[r:AdminTo|CanRDP|CanPSRemote|ExecuteDCOM]->(c:Computer) WHERE c.purdue_level <= 3 AND NOT (c.ot_role = 'EWS' OR (c)-[:CanProgram]->()) AND p.purdue_level IS NULL AND p.ot_role IS NULL AND NOT p.tier0 RETURN r",
+       target: OT_CONTROLLERS,
+       desc: "Principals not marked as OT and not Tier Zero hold local admin or remote logon rights on Purdue level 0-3 computers (HMIs, historians, SCADA servers) other than engineering workstations.",
+       impact: "IT compromise reaches into the control network directly, bypassing the OT DMZ; from these hosts an attacker can operate the process or move on to engineering workstations.",
+       fix: "Route all access from IT through the OT DMZ jump host with dedicated OT accounts; remove IT groups (and broad groups such as Domain Users) from local groups of OT hosts."),
+    f!("ot-legacy-os", Medium, "OT", Nodes, "Legacy Windows in OT", ["T0866"],
+       "MATCH (c:Computer {enabled:true}) WHERE c.purdue_level <= 3 AND (c.operatingsystem CONTAINS '2003' OR c.operatingsystem CONTAINS '2008' OR c.operatingsystem CONTAINS '2012' OR c.operatingsystem CONTAINS 'XP' OR c.operatingsystem CONTAINS 'WINDOWS 7' OR c.operatingsystem CONTAINS 'STANDARD 7' OR c.operatingsystem CONTAINS 'VISTA') RETURN c",
+       desc: "Purdue level 0-3 computers run Windows versions out of mainstream support (XP, Vista, 7, Embedded 7, Server 2003-2012 R2).",
+       impact: "Unpatched remote code execution vulnerabilities give an attacker on the network an easy foothold next to the controllers.",
+       fix: "Plan upgrades with the control system vendor. Until then, isolate these hosts in their own zone, allow only the conduits the process needs, and disable unused services (SMB, RDP) where the vendor permits."),
+    f!("ot-no-laps", Medium, "OT", Nodes, "OT hosts without LAPS", ["T0859"],
+       "MATCH (c:Computer {enabled:true}) WHERE c.purdue_level <= 3 AND NOT c.haslaps RETURN c",
+       desc: "Purdue level 0-3 computers without a LAPS-managed local administrator password.",
+       impact: "OT hosts often share one local administrator password; one compromised host gives local admin on the others.",
+       fix: "Deploy Windows LAPS where the vendor supports it; otherwise set unique local administrator passwords and keep them in a vault, and disable the built-in Administrator for network logons."),
+    f!("ot-vendor-accounts", Medium, "OT", Nodes, "Enabled vendor accounts", ["T0822", "T0859"],
+       "MATCH (u:User {enabled:true}) WHERE u.ot_role = 'Vendor' RETURN u",
+       desc: "Vendor or integrator accounts (ot_role Vendor) are enabled permanently.",
+       impact: "Standing third-party access is a common way into OT networks; these passwords are often shared and rarely changed.",
+       fix: "Disable vendor accounts between support sessions and enable them on request for a limited time; require MFA on the remote access path and record sessions."),
 ];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Exposure {
     pub principals_cut: u64,
     pub percent_of_exposed: f64,
+    /// What the principals lose their paths to ("Tier Zero", "OT controllers").
+    pub target: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +355,8 @@ pub fn baseline(g: &Graph, tier0: &[u32]) -> u64 {
 }
 
 /// Evaluate one finding; `None` when it has no items (or the query failed).
+/// `tier0` and `baseline` are the default target; findings with their own
+/// [`Target`] measure against it.
 pub fn evaluate_one(g: &Graph, def: &'static FindingDef, tier0: &[u32], baseline: u64, cancel: &Cancel) -> Option<FindingResult> {
     let res = run_capped(g, def.query, FINDING_ITEM_CAP, FINDING_ITEM_CAP, cancel).ok()?;
     let items = match def.kind {
@@ -309,6 +366,18 @@ pub fn evaluate_one(g: &Graph, def: &'static FindingDef, tier0: &[u32], baseline
     if items.is_empty() {
         return None;
     }
+    let own_target;
+    let (targets, baseline, label): (&[u32], u64, &'static str) = match def.target {
+        None => (tier0, baseline, TIER0_LABEL),
+        Some(t) => {
+            let mut nodes = run_capped(g, t.selector, usize::MAX, FINDING_ITEM_CAP, cancel).map(|r| r.nodes).unwrap_or_default();
+            nodes.sort_unstable();
+            nodes.dedup();
+            own_target = nodes;
+            let base = if own_target.is_empty() { 0 } else { self::baseline(g, &own_target) };
+            (&own_target, base, t.label)
+        }
+    };
     // Impact edges: the finding's own items, or a dedicated measurement query.
     let measured: Option<Vec<EdgeKey>> = match def.impact_query {
         Some(q) => run_capped(g, q, FINDING_ITEM_CAP, FINDING_ITEM_CAP, cancel).ok().map(|r| r.edges),
@@ -317,15 +386,15 @@ pub fn evaluate_one(g: &Graph, def: &'static FindingDef, tier0: &[u32], baseline
     let exposure = match (&items, measured) {
         (_, Some(es)) if baseline > 0 => {
             let removal = Removal { edges: es.into_iter().collect(), ..Default::default() };
-            let after = exposure_with(g, tier0, &removal, 0).exposed_principals;
+            let after = exposure_with(g, targets, &removal, 0).exposed_principals;
             let cut = baseline.saturating_sub(after);
-            Some(Exposure { principals_cut: cut, percent_of_exposed: 100.0 * cut as f64 / baseline as f64 })
+            Some(Exposure { principals_cut: cut, percent_of_exposed: 100.0 * cut as f64 / baseline as f64, target: label })
         }
         (Items::Edges(es), None) if baseline > 0 => {
             let removal = Removal { edges: es.iter().copied().collect(), ..Default::default() };
-            let after = exposure_with(g, tier0, &removal, 0).exposed_principals;
+            let after = exposure_with(g, targets, &removal, 0).exposed_principals;
             let cut = baseline.saturating_sub(after);
-            Some(Exposure { principals_cut: cut, percent_of_exposed: 100.0 * cut as f64 / baseline as f64 })
+            Some(Exposure { principals_cut: cut, percent_of_exposed: 100.0 * cut as f64 / baseline as f64, target: label })
         }
         _ => None,
     };

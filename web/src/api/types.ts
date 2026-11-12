@@ -632,6 +632,8 @@ export interface Page<T> {
 export interface FindingExposure {
   principals_cut: number;
   percent_of_exposed: number;
+  /** What the principals lose their paths to: "Tier Zero", "OT controllers". */
+  target: string;
 }
 
 export interface Finding {

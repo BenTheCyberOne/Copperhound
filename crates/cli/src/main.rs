@@ -305,7 +305,10 @@ fn main() -> Result<()> {
                     let impact = f
                         .exposure
                         .as_ref()
-                        .map(|e| format!("  fixes {} principals ({:.1}%)", num(e.principals_cut), e.percent_of_exposed))
+                        .map(|e| {
+                            let to = if e.target == ch_analysis::findings::TIER0_LABEL { String::new() } else { format!(" to {}", e.target) };
+                            format!("  fixes {} principals ({:.1}%){to}", num(e.principals_cut), e.percent_of_exposed)
+                        })
                         .unwrap_or_default();
                     println!("  {sev:<8} {:<62} {:>10}{impact}", f.def.title, num(f.items.len() as u64));
                 }

@@ -61,15 +61,16 @@ export function RichText({ text }: { text: string }) {
 }
 
 /** "fixing removes N principals' paths" meter for edge findings. */
-export function ImpactBar({ cut, percent }: { cut: number; percent: number }) {
-  if (cut === 0) return <span className="muted small-text">no principal loses its path</span>;
+export function ImpactBar({ cut, percent, target = "Tier Zero" }: { cut: number; percent: number; target?: string }) {
+  const other = target !== "Tier Zero";
+  if (cut === 0) return <span className="muted small-text">no principal loses its path{other ? ` to ${target}` : ""}</span>;
   return (
-    <div className="impact" title={`Fixing removes ${cut.toLocaleString()} principals' paths, ${pctText(percent)} of exposure`}>
+    <div className="impact" title={`Fixing removes ${cut.toLocaleString()} principals' paths to ${target}, ${pctText(percent)} of exposure`}>
       <div className="impact-track" role="presentation">
         <div className="impact-fill" style={{ width: `${Math.min(100, Math.max(percent, percent > 0 ? 2 : 0))}%` }} />
       </div>
       <span className="small-text">
-        −{cut.toLocaleString()} <span className="muted">({pctText(percent)})</span>
+        −{cut.toLocaleString()} <span className="muted">({pctText(percent)}){other ? ` to ${target}` : ""}</span>
       </span>
     </div>
   );

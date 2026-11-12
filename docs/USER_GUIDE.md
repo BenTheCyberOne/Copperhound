@@ -118,8 +118,8 @@ stays fast on very large graphs. Pick one of the **Examples** to start.
 
 ![Findings](screenshots/findings.png)
 
-**Findings** lists detected misconfigurations: 30 types across AD, ADCS,
-Entra ID and hybrid. Each row shows its severity, MITRE ATT&CK techniques and **exposure
+**Findings** lists detected misconfigurations: 42 types across AD, ADCS,
+Entra ID, hybrid and OT. Each row shows its severity, MITRE ATT&CK techniques and **exposure
 impact**: how many principals lose their path to Tier Zero if you fix it, measured by
 re-running the analysis without those edges.
 

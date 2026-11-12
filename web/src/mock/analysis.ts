@@ -378,7 +378,11 @@ function evaluate(def: FindingDef): Finding & { items: FindingItem[] } {
       items.map((i) => ("src" in i ? `${i.src.id}|${i.kind}|${i.dst.id}` : "")),
     );
     const after = computeExposure(targets, { edges: removeIds }).exposed.length;
-    exposure = { principals_cut: before - after, percent_of_exposed: before ? Math.round(((before - after) / before) * 1000) / 10 : 0 };
+    exposure = {
+      principals_cut: before - after,
+      percent_of_exposed: before ? Math.round(((before - after) / before) * 1000) / 10 : 0,
+      target: "Tier Zero",
+    };
   }
   const { detect: _detect, ...rest } = def;
   return { ...rest, count: items.length, exposure, items };

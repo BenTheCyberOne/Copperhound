@@ -172,7 +172,7 @@ function FindingsList() {
                       <td className="num">{f.count.toLocaleString()}</td>
                       <td className="impact-cell">
                         {f.exposure ? (
-                          <ImpactBar cut={f.exposure.principals_cut} percent={f.exposure.percent_of_exposed} />
+                          <ImpactBar cut={f.exposure.principals_cut} percent={f.exposure.percent_of_exposed} target={f.exposure.target} />
                         ) : (
                           <span className="muted small-text">—</span>
                         )}

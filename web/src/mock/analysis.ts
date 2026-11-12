@@ -503,6 +503,7 @@ export function remediationPlan(req: PlanRequest): PlanResponse | null {
       principals_cut: cut,
       exposed_after: exposedAfter,
       cumulative_reduction_percent: baseline ? Math.round(((baseline - exposedAfter) / baseline) * 1000) / 10 : 0,
+      needs_window: false,
     });
   }
   return { baseline, truncated: false, steps, elapsed_ms: 18.4 };

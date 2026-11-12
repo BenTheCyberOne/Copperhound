@@ -371,10 +371,11 @@ pub fn render_html(r: &ReportInput) -> String {
                 let more = if s.edges.len() > 4 { format!("<br><span class=\"muted\">… and {} more</span>", s.edges.len() - 4) } else { String::new() };
                 let _ = write!(
                     h,
-                    "<tr><td>{}</td><td>{} <span class=\"muted\">({})</span></td><td><code>{}</code>{more}</td><td class=\"n\">{}</td><td class=\"n\">{:.1}%</td></tr>",
+                    "<tr><td>{}</td><td>{} <span class=\"muted\">({}){}</span></td><td><code>{}</code>{more}</td><td class=\"n\">{}</td><td class=\"n\">{:.1}%</td></tr>",
                     i + 1,
                     esc(g.name(s.node)),
-                    g.kind(s.node).as_str(),
+                    g.kind_name(s.node),
+                    if s.needs_window { " · maintenance window" } else { "" },
                     edges.join("<br>"),
                     num(s.principals_cut),
                     s.cumulative_reduction_percent
@@ -463,7 +464,8 @@ pub fn render_markdown(r: &ReportInput) -> String {
     if let Some(p) = r.plan.filter(|p| !p.steps.is_empty()) {
         let _ = writeln!(m, "\n## Remediation plan\n\n| # | Sever | Cuts | Total cut |\n|---:|---|---:|---:|");
         for (i, s) in p.steps.iter().enumerate() {
-            let _ = writeln!(m, "| {} | {} ({}) | {} | {:.1}% |", i + 1, md_cell(g.name(s.node)), g.kind(s.node).as_str(), num(s.principals_cut), s.cumulative_reduction_percent);
+            let window = if s.needs_window { ", maintenance window" } else { "" };
+            let _ = writeln!(m, "| {} | {} ({}{window}) | {} | {:.1}% |", i + 1, md_cell(g.name(s.node)), g.kind_name(s.node), num(s.principals_cut), s.cumulative_reduction_percent);
         }
     }
     if !r.accepted.is_empty() {

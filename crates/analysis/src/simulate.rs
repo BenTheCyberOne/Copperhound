@@ -38,12 +38,52 @@ pub fn simulate(g: &Graph, targets: &[u32], added_targets: &[u32], removal: &Rem
     SimResult { before, after, reduction, reduction_percent }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PlanOptions {
     pub steps: usize,
     pub fixed_kinds: Vec<u16>,
     /// Do not propose removing `MemberOf` / `AZMemberOf` edges into target members.
     pub protect_target_membership: bool,
+    /// Per-node fix cost ([`FixCost`] as `u8`), e.g. from [`fix_costs`]. An
+    /// edge costs the higher of its two ends. Choke objects with a `Fixed`
+    /// onward edge are never proposed; steps with a `Window` edge are flagged.
+    pub node_cost: Option<Vec<u8>>,
+    /// Prefer choke objects that need no maintenance window: every live step
+    /// comes before any window step (each group ordered by cut).
+    pub live_first: bool,
+}
+
+/// How hard it is to change an object (node property `fix_cost`, docs/OT.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum FixCost {
+    /// Can be changed any time (default).
+    Live = 0,
+    /// Needs a maintenance window (reboot, process stop, vendor visit).
+    Window = 1,
+    /// Must not be changed (certified configuration, safety system).
+    Fixed = 2,
+}
+
+/// Fix costs from the `fix_cost` node property (`window` / `fixed`, case-
+/// insensitive); `None` when no node has one.
+pub fn fix_costs(g: &Graph) -> Option<Vec<u8>> {
+    let mut cost = vec![FixCost::Live as u8; g.node_count()];
+    let mut any = false;
+    for (value, c) in [("window", FixCost::Window), ("fixed", FixCost::Fixed)] {
+        let q = format!("MATCH (n) WHERE n.fix_cost = '{value}' RETURN n");
+        let cap = g.node_count().max(1);
+        match ch_query::run_capped(g, &q, cap, cap, &Cancel::never()) {
+            Ok(r) => {
+                for n in r.nodes {
+                    cost[n as usize] = cost[n as usize].max(c as u8);
+                    any = true;
+                }
+            }
+            Err(e) => panic!("fix_cost selector failed: {e}"),
+        }
+    }
+    any.then_some(cost)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +95,8 @@ pub struct PlanStep {
     pub principals_cut: u64,
     pub exposed_after: u64,
     pub cumulative_reduction_percent: f64,
+    /// Some edge of this step touches an object whose fix needs a maintenance window.
+    pub needs_window: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -510,7 +552,9 @@ fn eval(v: u32, last: u32, link: &mut [[u32; 2]], stack: &mut Vec<u32>) -> u32 {
 /// Remediation plan: each step severs the single choke object that cuts the
 /// most principals off from the zone entirely (exact, via dominators), then
 /// recomputes. A choke object qualifies only if all its onward attack edges are
-/// removable (not of a `fixed_kinds` kind); ties go to the lower node id.
+/// removable (not of a `fixed_kinds` kind, no end with fix cost `Fixed`); ties
+/// go to the lower node id. With `live_first`, qualifying objects that need no
+/// maintenance window win over those that do.
 pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> Plan {
     let f = EdgeFilter::traversable(g);
     let zone = if opts.protect_target_membership { expand_membership(g, targets) } else { targets.to_vec() };
@@ -524,8 +568,13 @@ pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> 
             break;
         };
         let base = *baseline.get_or_insert(dom.exposed);
-        // Best choke object whose onward edges are all removable.
-        let pick = dom.ranked.iter().find_map(|&(d, cut)| {
+        // Best choke object whose onward edges are all removable. `ranked` is
+        // ordered by cut, then node id, so the first qualifying entry wins;
+        // with `live_first` the first live one wins over the first window one.
+        let cost = |n: u32| opts.node_cost.as_ref().map_or(FixCost::Live as u8, |c| c[n as usize]);
+        let mut window_pick = None;
+        let mut pick = None;
+        for &(d, cut) in &dom.ranked {
             let (ds, ks) = g.out_edges(d);
             let onward: Vec<EdgeKey> = ds
                 .iter()
@@ -533,9 +582,22 @@ pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> 
                 .filter(|(&v, &k)| f.allows(k) && planner.reachable(v))
                 .map(|(&v, &k)| (d, v, k))
                 .collect();
-            (!onward.is_empty() && onward.iter().all(|e| !opts.fixed_kinds.contains(&e.2))).then_some((d, cut, onward))
-        });
-        let Some((node, cut, onward)) = pick else { break };
+            if onward.is_empty() || onward.iter().any(|e| opts.fixed_kinds.contains(&e.2)) {
+                continue;
+            }
+            let worst = onward.iter().map(|e| cost(e.0).max(cost(e.1))).max().unwrap_or(0);
+            if worst >= FixCost::Fixed as u8 {
+                continue;
+            }
+            let needs_window = worst == FixCost::Window as u8;
+            if needs_window && opts.live_first {
+                window_pick.get_or_insert((d, cut, onward, true));
+                continue;
+            }
+            pick = Some((d, cut, onward, needs_window));
+            break;
+        }
+        let Some((node, cut, onward, needs_window)) = pick.or(window_pick) else { break };
         planner.kill(node);
         let exposed_after = dom.exposed - cut;
         steps.push(PlanStep {
@@ -544,6 +606,7 @@ pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> 
             principals_cut: cut,
             exposed_after,
             cumulative_reduction_percent: if base == 0 { 0.0 } else { 100.0 * (base - exposed_after) as f64 / base as f64 },
+            needs_window,
         });
     }
     Plan { baseline: baseline.unwrap_or(0), steps, truncated }
@@ -709,18 +772,32 @@ mod tests {
                 break;
             };
             let base = *baseline.get_or_insert(dom.exposed);
-            // Best choke object whose onward edges are all removable.
-            let pick = dom.ranked.iter().take(256).find_map(|&(d, cut)| {
-                let (ds, ks) = g.out_edges(d);
-                let onward: Vec<EdgeKey> = ds
-                    .iter()
-                    .zip(ks)
-                    .filter(|(&v, &k)| dom.reachable[v as usize] && allow(d, v, k))
-                    .map(|(&v, &k)| (d, v, k))
-                    .collect();
-                (!onward.is_empty() && onward.iter().all(|e| !opts.fixed_kinds.contains(&e.2))).then_some((d, cut, onward))
-            });
-            let Some((node, cut, onward)) = pick else { break };
+            // Best choke object whose onward edges are all removable; with
+            // `live_first`, live candidates before window ones.
+            let cost = |n: u32| opts.node_cost.as_ref().map_or(0, |c| c[n as usize]);
+            let candidates: Vec<(u32, u64, Vec<EdgeKey>, u8)> = dom
+                .ranked
+                .iter()
+                .take(256)
+                .filter_map(|&(d, cut)| {
+                    let (ds, ks) = g.out_edges(d);
+                    let onward: Vec<EdgeKey> = ds
+                        .iter()
+                        .zip(ks)
+                        .filter(|(&v, &k)| dom.reachable[v as usize] && allow(d, v, k))
+                        .map(|(&v, &k)| (d, v, k))
+                        .collect();
+                    let worst = onward.iter().map(|e| cost(e.0).max(cost(e.1))).max().unwrap_or(0);
+                    (!onward.is_empty() && onward.iter().all(|e| !opts.fixed_kinds.contains(&e.2)) && worst < 2)
+                        .then_some((d, cut, onward, worst))
+                })
+                .collect();
+            let pick = if opts.live_first {
+                candidates.iter().find(|c| c.3 == 0).or(candidates.first()).cloned()
+            } else {
+                candidates.first().cloned()
+            };
+            let Some((node, cut, onward, worst)) = pick else { break };
             removal.edges.extend(onward.iter().copied());
             let exposed_after = dom.exposed - cut;
             steps.push(PlanStep {
@@ -729,6 +806,7 @@ mod tests {
                 principals_cut: cut,
                 exposed_after,
                 cumulative_reduction_percent: if base == 0 { 0.0 } else { 100.0 * (base - exposed_after) as f64 / base as f64 },
+                needs_window: worst == 1,
             });
         }
         Plan { baseline: baseline.unwrap_or(0), steps, truncated }
@@ -800,6 +878,7 @@ mod tests {
                 "{ctx}: step {i}"
             );
             assert_eq!(x.cumulative_reduction_percent, y.cumulative_reduction_percent, "{ctx}: step {i} percent");
+            assert_eq!(x.needs_window, y.needs_window, "{ctx}: step {i} window");
         }
         (a.steps.len(), a.steps.iter().filter(|s| s.principals_cut > 1).count())
     }
@@ -813,7 +892,7 @@ mod tests {
             let g = random_graph(n, m, 1 + (seed % 4) as u32, seed);
             let targets = g.nodes_with_flag(flags::TIER0);
             for (protect, fixed) in [(true, vec![]), (false, vec![]), (true, vec![ek::MEMBER_OF]), (false, vec![ek::ADMIN_TO, ek::HAS_SESSION])] {
-                let opts = PlanOptions { steps: 15, fixed_kinds: fixed, protect_target_membership: protect };
+                let opts = PlanOptions { steps: 15, fixed_kinds: fixed, protect_target_membership: protect, ..Default::default() };
                 let (s, b) = assert_same(&g, &targets, &opts, &format!("seed {seed} n {n} m {m} protect {protect}"));
                 steps += s;
                 big += b;
@@ -824,13 +903,42 @@ mod tests {
         assert!(steps > 5_000 && big > 1_000, "{steps} steps, {big} non-trivial");
     }
 
+    /// Fix costs: random `window` / `fixed` nodes, with and without `live_first`.
+    #[test]
+    fn fix_costs_match_reference() {
+        let mut window = 0;
+        for seed in 0..200u64 {
+            let n = 30 + (seed * 37 % 250) as u32;
+            let g = random_graph(n, n as usize * (2 + (seed % 3) as usize), 1 + (seed % 3) as u32, 5000 + seed);
+            let targets = g.nodes_with_flag(flags::TIER0);
+            let mut rng = Rng(seed * 7919 + 1);
+            let cost: Vec<u8> = (0..n).map(|_| match rng.below(10) { 0 => 2, 1 | 2 => 1, _ => 0 }).collect();
+            for live_first in [false, true] {
+                let opts = PlanOptions { steps: 12, protect_target_membership: seed % 2 == 0, node_cost: Some(cost.clone()), live_first, ..Default::default() };
+                assert_same(&g, &targets, &opts, &format!("cost seed {seed} live_first {live_first}"));
+                let p = plan(&g, &targets, &opts, &Cancel::never());
+                for s in &p.steps {
+                    // No proposed edge touches a fixed object.
+                    assert!(s.edges.iter().all(|e| cost[e.0 as usize] < 2 && cost[e.1 as usize] < 2), "seed {seed}");
+                    assert_eq!(s.needs_window, s.edges.iter().any(|e| cost[e.0 as usize] == 1 || cost[e.1 as usize] == 1));
+                    window += s.needs_window as usize;
+                }
+            }
+            // Without costs the plan is unchanged by live_first.
+            let a = plan(&g, &targets, &PlanOptions { steps: 8, ..Default::default() }, &Cancel::never());
+            let b = plan(&g, &targets, &PlanOptions { steps: 8, live_first: true, ..Default::default() }, &Cancel::never());
+            assert_eq!(a.steps.iter().map(|s| s.node).collect::<Vec<_>>(), b.steps.iter().map(|s| s.node).collect::<Vec<_>>());
+        }
+        assert!(window > 100, "window steps exercised: {window}");
+    }
+
     /// Big enough for the parallel BFS / CSR paths and multi-chunk builds.
     #[test]
     fn matches_reference_on_larger_graphs() {
         for seed in 0..3u64 {
             let g = random_graph(60_000, 150_000 + 50_000 * seed as usize, 5, 1000 + seed);
             let targets = g.nodes_with_flag(flags::TIER0);
-            let opts = PlanOptions { steps: 10, fixed_kinds: vec![], protect_target_membership: true };
+            let opts = PlanOptions { steps: 10, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
             assert_same(&g, &targets, &opts, &format!("large seed {seed}"));
         }
     }
@@ -840,14 +948,14 @@ mod tests {
         let g = random_graph(200, 600, 2, 7);
         let targets = g.nodes_with_flag(flags::TIER0);
         // No steps, no targets, duplicated targets.
-        let opts = PlanOptions { steps: 0, fixed_kinds: vec![], protect_target_membership: true };
+        let opts = PlanOptions { steps: 0, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
         assert_same(&g, &targets, &opts, "zero steps");
-        let opts = PlanOptions { steps: 5, fixed_kinds: vec![], protect_target_membership: true };
+        let opts = PlanOptions { steps: 5, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
         assert_same(&g, &[], &opts, "no targets");
         let dup: Vec<u32> = targets.iter().chain(&targets).copied().collect();
         assert_same(&g, &dup, &opts, "duplicate targets");
         // Run until nothing is left to cut.
-        let opts = PlanOptions { steps: 1000, fixed_kinds: vec![], protect_target_membership: false };
+        let opts = PlanOptions { steps: 1000, fixed_kinds: vec![], protect_target_membership: false, ..Default::default() };
         assert_same(&g, &targets, &opts, "exhaustive");
         // Cancelled up front: truncated, like the reference.
         let c = Cancel::never();

@@ -141,7 +141,7 @@ fn exposure(g: &Graph, unified: bool) -> Value {
 
 fn plan(g: &Graph) -> Value {
     let tier0 = g.nodes_with_flag(flags::TIER0);
-    let opts = simulate::PlanOptions { steps: 8, fixed_kinds: vec![], protect_target_membership: true };
+    let opts = simulate::PlanOptions { steps: 8, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
     let p = simulate::plan(g, &tier0, &opts, &ch_query::Cancel::never());
     json!({
         "baseline": p.baseline,

@@ -19,6 +19,7 @@ ingest and analysis are the same.
 | `ot_role` | any node | free text; the library and zone templates use `EWS` (engineering workstation), `HMI`, `Historian`, `SCADA`, `JumpHost`, `PLC`, `SIS`, `Vendor` |
 | `CanProgram` edge | EWS or account → controller | the source can change the target's logic, configuration or firmware ([edge reference](EDGES.md#ot)) |
 | custom node kinds | controllers and devices | e.g. `PLC`, `OTDevice`; any name works and becomes a CHQL label |
+| `fix_cost` | any node | `window`: changing it needs a maintenance window; `fixed`: it must not be changed (see [Fix cost](#fix-cost)) |
 
 Objects without `purdue_level` count as IT in the queries below.
 
@@ -111,6 +112,29 @@ The **OT / ICS** category in the query library:
 | `ot-no-laps` | level 0–3 computers without LAPS |
 | `ot-unconstrained` | unconstrained delegation at level 0–3 |
 
+## Fix cost
+
+In OT many fixes cannot happen at any time: a reboot needs a production stop, a
+vendor-certified configuration voids support when changed, and a safety system's
+configuration must not change at all. Tell the remediation planner with the
+`fix_cost` node property (set it in the OpenGraph inventory like the Purdue
+level):
+
+- `fixed`: never change this object. The planner skips every choke object with
+  an edge to or from it, and proposes the next best cut instead.
+- `window`: changes need a maintenance window. Steps that touch such an object
+  are labelled **maintenance window** in the planner, the report and the CLI.
+- Anything else, or no property: the fix can be done any time.
+
+An edge costs the higher of its two ends. For example, removing IT access to an
+engineering workstation marked `window` is a window step.
+
+**Remediation → Remediation planner** honours fix costs by default. **Fixes that
+need no maintenance window first** puts every step you can do any time before
+the window steps, so the plan splits into "now" and "next maintenance window". On
+the command line, use `copperhound plan corp.chg --live-first`. The setting works
+for every zone, not just OT ones.
+
 ## Findings
 
 The OT findings run with every analysis. With no OT data they find nothing. A
@@ -148,11 +172,12 @@ has these weaknesses:
 - Domain Users can RDP to an HMI.
 - Some hosts run Windows 7 or Server 2012 R2, and some have no LAPS.
 
+Hosts below the DMZ and the PLCs have `fix_cost: window`, and the safety system
+has `fix_cost: fixed`.
+
 ## Not covered yet
 
 - **Network reachability.** Firewall rules and conduits are not modelled, so a
   path through `AdminTo` assumes the network allows the connection. Read OT
   paths as "the identity allows it". Check the conduit rules before you rank a
   path as exploitable.
-- **Fix cost.** The remediation planner does not weigh how hard a fix is,
-  such as a reboot window or a vendor-certified configuration.

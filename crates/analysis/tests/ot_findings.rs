@@ -76,7 +76,8 @@ fn fixture(d: &Path, with_ot: bool) {
                 {"id": hist, "kinds": ["Computer"], "properties": {"purdue_level": 3, "ot_role": "Historian"}},
                 {"id": carol, "kinds": ["User"], "properties": {"ot_role": "OTUser"}},
                 {"id": ot_eng, "kinds": ["Group"], "properties": {"ot_role": "OTGroup"}},
-                {"id": "plc-1", "kinds": ["PLC"], "properties": {"name": "PLC-1", "purdue_level": 1, "ot_role": "PLC"}}
+                {"id": "plc-1", "kinds": ["PLC"], "properties": {"name": "PLC-1", "purdue_level": 1, "ot_role": "PLC", "fix_cost": "Fixed"}},
+                {"id": hist, "kinds": ["Computer"], "properties": {"fix_cost": "window"}}
             ],
             "edges": [{"kind": "CanProgram", "start": {"value": ews}, "end": {"value": "plc-1"}}]}});
         fs::write(d.join("z_ot.json"), og.to_string()).unwrap();
@@ -144,4 +145,18 @@ fn no_ot_findings_without_ot_data() {
     assert!(ot.is_empty(), "{ot:?}");
     assert!(CATALOG.iter().filter(|d| d.category == "OT").all(|d| d.mitre.iter().all(|m| m.starts_with("T0"))));
     let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn fix_costs_from_properties() {
+    use ch_analysis::simulate::{fix_costs, FixCost};
+    let (d, g) = graph("ot-fix-costs", true);
+    let cost = fix_costs(&g).expect("fix_cost properties present");
+    assert_eq!(cost[g.lookup("plc-1").unwrap() as usize], FixCost::Fixed as u8, "case-insensitive");
+    assert_eq!(cost[g.lookup(&sid(1203)).unwrap() as usize], FixCost::Window as u8);
+    assert_eq!(cost[g.lookup(&sid(1201)).unwrap() as usize], FixCost::Live as u8);
+    let (d2, g2) = graph("ot-fix-costs-none", false);
+    assert!(fix_costs(&g2).is_none());
+    let _ = fs::remove_dir_all(&d);
+    let _ = fs::remove_dir_all(&d2);
 }

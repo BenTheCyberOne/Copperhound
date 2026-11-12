@@ -556,7 +556,9 @@ class Env:
         # OpenGraph asset inventory: Purdue levels and roles of the AD hosts,
         # the controllers, and what can program them.
         nodes = [{"id": c["ObjectIdentifier"], "kinds": ["Computer"],
-                  "properties": {"purdue_level": level, "ot_role": role, "site": "Hollowbrook Mill"}}
+                  "properties": {"purdue_level": level, "ot_role": role, "site": "Hollowbrook Mill",
+                                 # changes below the DMZ wait for a maintenance window
+                                 **({"fix_cost": "window"} if level < 3.5 else {})}}
                  for c, level, role in hosts.values()]
         for u in engineers + operators + [vendor]:
             nodes.append({"id": u["ObjectIdentifier"], "kinds": ["User"],
@@ -572,7 +574,9 @@ class Env:
                           "properties": {"name": name, "purdue_level": level, "ot_role": role, "description": desc,
                                          "vendor": "Fabricated Controls",
                                          "firmware": f"{r.randint(2, 4)}.{r.randint(0, 9)}.{r.randint(0, 20)}",
-                                         "site": "Hollowbrook Mill"}})
+                                         "site": "Hollowbrook Mill",
+                                         # the safety system's configuration is certified: never changed
+                                         "fix_cost": "fixed" if role == "SIS" else "window"}})
         ids = {**{n: c["ObjectIdentifier"] for n, c in h.items()}, **{d[0]: f"ot-{d[0].lower()}" for d in devices}}
         prog = [("OT-EWS01", "PLC-LINE1"), ("OT-EWS01", "PLC-LINE2"), ("OT-EWS01", "PLC-BOILER"),
                 ("OT-EWS02", "SIS-BOILER"), ("PLC-LINE1", "DRIVE-L1-01")]

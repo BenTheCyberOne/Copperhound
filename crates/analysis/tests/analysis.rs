@@ -40,7 +40,7 @@ fn findings_simulation_and_plan() {
 
     // Planner: every step strictly cuts principals, never touches zone membership,
     // and its claimed result matches an independent exposure computation.
-    let p = plan(&g, &tier0, &PlanOptions { steps: 5, fixed_kinds: vec![], protect_target_membership: true }, &Cancel::never());
+    let p = plan(&g, &tier0, &PlanOptions { steps: 5, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() }, &Cancel::never());
     assert!(!p.steps.is_empty());
     let zone = ch_analysis::simulate::expand_membership(&g, &tier0);
     let mut prev = p.baseline;
@@ -58,6 +58,6 @@ fn findings_simulation_and_plan() {
     assert_eq!(base.exposed_principals, p.baseline);
 
     // Fixed kinds are never proposed.
-    let p2 = plan(&g, &tier0, &PlanOptions { steps: 3, fixed_kinds: vec![ek::HAS_SESSION], protect_target_membership: true }, &Cancel::never());
+    let p2 = plan(&g, &tier0, &PlanOptions { steps: 3, fixed_kinds: vec![ek::HAS_SESSION], protect_target_membership: true, ..Default::default() }, &Cancel::never());
     assert!(p2.steps.iter().all(|s| s.edges.iter().all(|e| e.2 != ek::HAS_SESSION)));
 }

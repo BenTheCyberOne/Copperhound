@@ -727,6 +727,10 @@ export interface PlanRequest {
   steps?: number;
   fixed_kinds?: string[];
   protect_target_membership?: boolean;
+  /** Honour the `fix_cost` node property (default true). */
+  respect_fix_cost?: boolean;
+  /** Propose fixes that need no maintenance window first. */
+  live_first?: boolean;
   timeout_ms?: number;
 }
 
@@ -745,6 +749,8 @@ export interface PlanStep {
   principals_cut: number;
   exposed_after: number;
   cumulative_reduction_percent: number;
+  /** An edge of this step touches an object with fix_cost "window". */
+  needs_window: boolean;
 }
 
 export interface PlanResponse {

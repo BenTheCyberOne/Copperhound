@@ -83,7 +83,7 @@ fn analysis(g: &Graph) -> String {
     }
     let tier0 = g.nodes_with_flag(flags::TIER0);
     let never = ch_query::Cancel::never();
-    let opts = simulate::PlanOptions { steps: 8, fixed_kinds: vec![], protect_target_membership: true };
+    let opts = simulate::PlanOptions { steps: 8, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
     let plan = simulate::plan(g, &tier0, &opts, &never);
     out += &serde_json::to_string(&plan).unwrap();
     out.push('\n');

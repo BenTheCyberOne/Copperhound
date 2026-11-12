@@ -100,6 +100,9 @@ enum Cmd {
         graph: PathBuf,
         #[arg(long, default_value_t = 10)]
         steps: usize,
+        /// Propose fixes that need no maintenance window first (node property `fix_cost`).
+        #[arg(long)]
+        live_first: bool,
     },
     /// Assessment report (HTML, Markdown or CSV) for a graph.
     Report {
@@ -315,22 +318,29 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Plan { graph, steps } => {
+        Cmd::Plan { graph, steps, live_first } => {
             let g = open(&graph)?;
             let tier0 = g.nodes_with_flag(flags::TIER0);
             let t = Instant::now();
-            let opts = ch_analysis::simulate::PlanOptions { steps, fixed_kinds: vec![], protect_target_membership: true };
+            let opts = ch_analysis::simulate::PlanOptions {
+                steps,
+                protect_target_membership: true,
+                node_cost: ch_analysis::simulate::fix_costs(&g),
+                live_first,
+                ..Default::default()
+            };
             let p = ch_analysis::simulate::plan(&g, &tier0, &opts, &ch_query::Cancel::never());
             println!("baseline exposed principals: {}   ({:.2}s)", num(p.baseline), t.elapsed().as_secs_f64());
             for (i, s) in p.steps.iter().enumerate() {
                 println!(
-                    "  {:>2}. sever {} ({}): cuts {} principals → {} exposed ({:.1}% total cut)",
+                    "  {:>2}. sever {} ({}): cuts {} principals → {} exposed ({:.1}% total cut){}",
                     i + 1,
                     g.name(s.node),
                     g.kind_name(s.node),
                     num(s.principals_cut),
                     num(s.exposed_after),
-                    s.cumulative_reduction_percent
+                    s.cumulative_reduction_percent,
+                    if s.needs_window { "  [maintenance window]" } else { "" }
                 );
                 for e in s.edges.iter().take(5) {
                     println!("        remove {} -[{}]-> {}", g.name(e.0), g.edge_kind_name(e.2), g.name(e.1));
@@ -350,7 +360,12 @@ fn main() -> Result<()> {
             let rep = ch_analysis::simulate::exposure_with(&g, &tier0, &ch_analysis::Removal::default(), 10);
             let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("html").to_ascii_lowercase();
             let plan = (plan_steps > 0 && ext != "csv").then(|| {
-                let opts = ch_analysis::simulate::PlanOptions { steps: plan_steps, fixed_kinds: vec![], protect_target_membership: true };
+                let opts = ch_analysis::simulate::PlanOptions {
+                    steps: plan_steps,
+                    protect_target_membership: true,
+                    node_cost: ch_analysis::simulate::fix_costs(&g),
+                    ..Default::default()
+                };
                 ch_analysis::simulate::plan(&g, &tier0, &opts, &never)
             });
             let generated = humantime::format_rfc3339_seconds(std::time::SystemTime::now()).to_string();

@@ -370,7 +370,7 @@ pub fn evaluate_one(g: &Graph, def: &'static FindingDef, tier0: &[u32], baseline
     let (targets, baseline, label): (&[u32], u64, &'static str) = match def.target {
         None => (tier0, baseline, TIER0_LABEL),
         Some(t) => {
-            let mut nodes = run_capped(g, t.selector, usize::MAX, FINDING_ITEM_CAP, cancel).map(|r| r.nodes).unwrap_or_default();
+            let mut nodes = run_capped(g, t.selector, g.node_count().max(1), g.node_count().max(1), cancel).map(|r| r.nodes).unwrap_or_default();
             nodes.sort_unstable();
             nodes.dedup();
             own_target = nodes;

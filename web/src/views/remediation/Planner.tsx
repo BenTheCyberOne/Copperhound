@@ -32,6 +32,8 @@ export function Planner() {
   const [steps, setSteps] = useState(10);
   const [fixed, setFixed] = useState<Set<string>>(new Set(["Contains"]));
   const [protect, setProtect] = useState(true);
+  const [respectCost, setRespectCost] = useState(true);
+  const [liveFirst, setLiveFirst] = useState(false);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -53,6 +55,8 @@ export function Planner() {
             steps,
             fixed_kinds: [...fixed],
             protect_target_membership: protect,
+            respect_fix_cost: respectCost,
+            live_first: respectCost && liveFirst,
             ...(settings.queryTimeoutMs > 0 ? { timeout_ms: settings.queryTimeoutMs } : {}),
           }),
         ),
@@ -76,9 +80,20 @@ export function Planner() {
   const exportCsv = (p: PlanResponse) =>
     downloadCsv(
       `remediation-plan-${zone}.csv`,
-      ["step", "choke_object", "choke_kind", "principals_cut", "exposed_after", "cumulative_reduction_percent", "source", "edge", "target"],
+      ["step", "choke_object", "choke_kind", "principals_cut", "exposed_after", "cumulative_reduction_percent", "needs_window", "source", "edge", "target"],
       p.steps.flatMap((s, i) =>
-        s.edges.map((e) => [i + 1, s.node.name, s.node.kind, s.principals_cut, s.exposed_after, s.cumulative_reduction_percent, e.src.name, e.kind, e.dst.name]),
+        s.edges.map((e) => [
+          i + 1,
+          s.node.name,
+          s.node.kind,
+          s.principals_cut,
+          s.exposed_after,
+          s.cumulative_reduction_percent,
+          s.needs_window ? "yes" : "no",
+          e.src.name,
+          e.kind,
+          e.dst.name,
+        ]),
       ),
     );
 
@@ -100,6 +115,14 @@ export function Planner() {
       <label className="toggle">
         <input type="checkbox" checked={protect} onChange={(e) => setProtect(e.target.checked)} />
         Treat members of zone groups as part of the zone (never propose removing admins from admin groups)
+      </label>
+      <label className="toggle" title="Node property fix_cost: 'fixed' objects are never changed, 'window' objects need a maintenance window">
+        <input type="checkbox" checked={respectCost} onChange={(e) => setRespectCost(e.target.checked)} />
+        Honour fix costs (skip objects marked <code>fixed</code>, flag <code>window</code>)
+      </label>
+      <label className="toggle">
+        <input type="checkbox" checked={liveFirst} disabled={!respectCost} onChange={(e) => setLiveFirst(e.target.checked)} />
+        Fixes that need no maintenance window first
       </label>
       <details className="kind-filter">
         <summary>
@@ -180,6 +203,14 @@ export function Planner() {
                     <div>
                       Remove {s.edge_count === 1 ? "this edge" : `these ${s.edge_count} edges`} from{" "}
                       <KindBadge kind={s.node.kind} /> <strong>{s.node.name}</strong>
+                      {s.needs_window && (
+                        <>
+                          {" "}
+                          <span className="tag" title="An object in this step has fix_cost 'window'">
+                            maintenance window
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="muted small-text">
                       cuts {fmt.format(s.principals_cut)} principals · {fmt.format(s.exposed_after)} still exposed ·{" "}

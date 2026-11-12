@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ch_analysis::findings::{baseline, evaluate_one, sort_results, FindingResult, Items, CATALOG};
 use ch_analysis::posture::{diff, snapshot_items, Snapshot, SnapshotItems};
-use ch_analysis::simulate::{exposure_with, plan, simulate, PlanOptions};
+use ch_analysis::simulate::{exposure_with, fix_costs, plan, simulate, PlanOptions};
 use ch_analysis::Removal;
 use ch_model::flags;
 use ch_store::Graph;
@@ -565,6 +565,11 @@ pub struct PlanReq {
     #[serde(default)]
     fixed_kinds: Vec<String>,
     protect_target_membership: Option<bool>,
+    /// Honour the `fix_cost` node property (default true).
+    respect_fix_cost: Option<bool>,
+    /// Propose fixes that need no maintenance window first.
+    #[serde(default)]
+    live_first: bool,
     timeout_ms: Option<u64>,
 }
 
@@ -580,6 +585,8 @@ pub async fn plan_api(State(st): St, Json(r): Json<PlanReq>) -> Result<Json<Valu
             steps: r.steps.unwrap_or(10).clamp(1, 50),
             fixed_kinds: fixed,
             protect_target_membership: r.protect_target_membership.unwrap_or(true),
+            node_cost: if r.respect_fix_cost.unwrap_or(true) { fix_costs(g) } else { None },
+            live_first: r.live_first,
         };
         let cancel = ch_query::Cancel::new(Some(std::time::Duration::from_millis(r.timeout_ms.unwrap_or(120_000).clamp(1000, 600_000))));
         let p = plan(g, members, &opts, &cancel);
@@ -593,6 +600,7 @@ pub async fn plan_api(State(st): St, Json(r): Json<PlanReq>) -> Result<Json<Valu
                 "principals_cut": s.principals_cut,
                 "exposed_after": s.exposed_after,
                 "cumulative_reduction_percent": s.cumulative_reduction_percent,
+                "needs_window": s.needs_window,
             })).collect::<Vec<_>>(),
             "elapsed_ms": t.elapsed().as_secs_f64() * 1e3,
         })))
@@ -724,7 +732,7 @@ pub fn render_report(
     let rep = exposure_with(g, &tier0, &Removal::default(), 10);
     let steps = plan_steps.min(50);
     let p = (steps > 0 && ext != "csv").then(|| {
-        let opts = PlanOptions { steps, fixed_kinds: vec![], protect_target_membership: true };
+        let opts = PlanOptions { steps, protect_target_membership: true, node_cost: fix_costs(g), ..Default::default() };
         plan(g, &tier0, &opts, &ch_query::Cancel::new(Some(std::time::Duration::from_secs(120))))
     });
     let snap = l.snapshot_id();

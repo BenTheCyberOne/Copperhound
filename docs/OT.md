@@ -109,7 +109,7 @@ The **OT / ICS** category in the query library:
 | `ot-tier0-sessions` | Tier Zero accounts logged on to level 0–3 computers |
 | `ot-sessions` | every session on level 0–3 computers |
 | `ot-dmz-admins` | administrators of OT DMZ hosts |
-| `ot-legacy-os` | Windows XP / Vista / 7 / Embedded 7 and Server 2003–2012 R2 at level 0–3 |
+| `ot-legacy-os` | Windows 2000 / XP / Vista / 7 / Embedded 7 / 8 / 8.1 and Server 2003–2012 R2 at level 0–3 |
 | `ot-no-laps` | level 0–3 computers without LAPS |
 | `ot-unconstrained` | unconstrained delegation at level 0–3 |
 
@@ -148,7 +148,7 @@ measured against **OT controllers** (Purdue level 0–1) instead of Tier Zero:
 |---|---|---|
 | IT principals can access engineering workstations | Critical | AdminTo, CanRDP, CanPSRemote or ExecuteDCOM held by IT principals (not Tier Zero) on hosts with `ot_role` EWS or a `CanProgram` edge |
 | IT principals can access OT hosts | High | the same rights on other Purdue level 0–3 computers |
-| Legacy Windows in OT | Medium | enabled level 0–3 computers on XP / Vista / 7 / Embedded 7 / Server 2003–2012 R2 |
+| Legacy Windows in OT | Medium | enabled level 0–3 computers on 2000 / XP / Vista / 7 / Embedded 7 / 8 / 8.1 / Server 2003–2012 R2 |
 | OT hosts without LAPS | Medium | enabled level 0–3 computers without LAPS |
 | Enabled vendor accounts | Medium | enabled users with `ot_role` Vendor |
 

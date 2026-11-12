@@ -191,7 +191,36 @@ async fn callback(app: &Router, idp: &Idp, st: &Started, claims: Value, kid: &'s
     }
     let (s, h, _) = send(app, b.body(Body::empty()).unwrap()).await;
     assert_eq!(s, StatusCode::SEE_OTHER);
-    h[header::LOCATION].to_str().unwrap().to_string()
+    let loc = h[header::LOCATION].to_str().unwrap().to_string();
+    // Remember the exchange cookie the browser would now hold.
+    if let (Some(code), Some(c)) = (loc.strip_prefix("/#/sso?code="), exchange_cookie(&h)) {
+        exchange_cookies().lock().unwrap().insert(code.to_string(), c);
+    }
+    loc
+}
+
+/// `ch_oidc=<binding>` from a sign-in response, if it set one.
+fn exchange_cookie(h: &HeaderMap) -> Option<String> {
+    h.get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter_map(|c| c.split(';').next())
+        .find(|c| c.starts_with("ch_oidc=") && c.len() > "ch_oidc=".len())
+        .map(str::to_string)
+}
+
+fn exchange_cookies() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// Redeem `code` from the browser that finished the sign-in.
+fn exchange_req(code: &str) -> Request<Body> {
+    let mut r = json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": code }));
+    if let Some(c) = exchange_cookies().lock().unwrap().get(code) {
+        r.headers_mut().insert(header::COOKIE, c.parse().unwrap());
+    }
+    r
 }
 
 async fn full_login(app: &Router, idp: &Idp, sub: &str, user: &str, groups: &[&str]) -> String {
@@ -262,14 +291,18 @@ async fn oidc_sign_in_flow() {
     // Happy path: analyst via group, one-time exchange code.
     let loc = full_login(&app, &idp, "sub-alice", "alice", &["ch-analysts", "other"]).await;
     let code = sso_code(&loc);
-    let (s, _, v) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": code }))).await;
+    let (s, _, v) = send(&app, exchange_req(&code)).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["username"], "alice");
     assert_eq!(v["role"], "analyst");
     assert_eq!(v["return_to"], "/#/findings");
     let alice = v["token"].as_str().unwrap().to_string();
-    let (s, _, _) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": code }))).await;
+    let (s, _, _) = send(&app, exchange_req(&code)).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "exchange codes are one-time");
+    // Login CSRF: a code redeemed from another browser (no binding cookie) is refused.
+    let loc = full_login(&app, &idp, "sub-alice", "alice", &["ch-analysts"]).await;
+    let (s, _, _) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": sso_code(&loc) }))).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "exchange code without the browser's binding cookie");
     let (s, _, v) = send(&app, get_req("/api/v1/me", Some(&alice))).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(v["source"], "oidc");
@@ -280,7 +313,7 @@ async fn oidc_sign_in_flow() {
 
     // Role is re-evaluated on every sign-in (same subject → same account).
     let loc = full_login(&app, &idp, "sub-alice", "alice-renamed", &["ch-admins"]).await;
-    let (_, _, v) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": sso_code(&loc) }))).await;
+    let (_, _, v) = send(&app, exchange_req(&sso_code(&loc))).await;
     assert_eq!((v["username"].as_str(), v["role"].as_str()), (Some("alice"), Some("admin")));
 
     // Bad nonce.
@@ -331,7 +364,7 @@ async fn oidc_sign_in_flow() {
     let st = start_login(&app, &idp).await;
     let c = claims(&idp, "sub-carol", "carol", &["ch-analysts"], &st.nonce);
     let loc = callback(&app, &idp, &st, c, "k2", Some(&st.cookie)).await;
-    let (s, _, v) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({ "code": sso_code(&loc) }))).await;
+    let (s, _, v) = send(&app, exchange_req(&sso_code(&loc))).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["username"], "carol");
 

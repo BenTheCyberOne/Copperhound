@@ -195,8 +195,14 @@ async fn remediation_tickets() {
     let (_, _) = call(&app, json_req("POST", "/api/v1/users", Some(t), json!({"username": "vic", "password": "viewer-password-1", "role": "viewer"}))).await;
     let (_, v) = call(&app, json_req("POST", "/api/v1/login", None, json!({"username":"vic","password":"viewer-password-1"}))).await;
     let vt = v["token"].as_str().unwrap().to_string();
-    let (s, _) = call(&app, get("/api/v1/tickets/targets", &vt)).await;
+    let (s, v) = call(&app, get("/api/v1/tickets/targets", &vt)).await;
     assert_eq!(s, StatusCode::OK);
+    // A webhook URL is a secret: viewers see its host only.
+    let hook = v.as_array().unwrap().iter().find(|x| x["id"] == "hook").unwrap();
+    assert!(!hook["url"].as_str().unwrap_or("").contains("/hook"), "{hook}");
+    let (_, v) = call(&app, get("/api/v1/tickets/targets", t)).await;
+    let hook = v.as_array().unwrap().iter().find(|x| x["id"] == "hook").unwrap();
+    assert!(hook["url"].as_str().unwrap().ends_with("/hook"), "admins see the full URL: {hook}");
     let (s, _) = call(&app, json_req("POST", "/api/v1/remediation/commands", Some(&vt), json!({"edges": edges}))).await;
     assert_eq!(s, StatusCode::OK);
     let (s, _) = call(&app, json_req("POST", "/api/v1/tickets", Some(&vt), json!({"target": "hook", "edges": edges}))).await;

@@ -5,6 +5,7 @@ import { useApp } from "../state/AppContext";
 import { useSession } from "../state/SessionContext";
 import { KindBadge } from "./KindBadge";
 import { Modal } from "./Modal";
+import { webHref } from "../util/format";
 
 export interface HandOffEdge {
   src: Pick<Node, "objectid" | "name">;
@@ -154,8 +155,8 @@ export function HandOffDialog({ edges, title: defaultTitle = "", more = 0, onClo
               <ul className="handoff-created">
                 {created.map((c) => (
                   <li key={c.key + c.title}>
-                    {c.url ? (
-                      <a href={c.url} target="_blank" rel="noreferrer noopener">
+                    {webHref(c.url) ? (
+                      <a href={webHref(c.url)} target="_blank" rel="noreferrer noopener">
                         {c.key}
                       </a>
                     ) : (

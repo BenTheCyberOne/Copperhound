@@ -479,6 +479,9 @@ struct Pending {
 pub struct Exchange {
     pub username: String,
     pub return_to: String,
+    /// Value of the browser cookie set with the code: a code redeemed by
+    /// another browser (login CSRF with an attacker's code) is refused.
+    binding: String,
     created: Instant,
 }
 
@@ -539,6 +542,8 @@ fn fail(code: &'static str, reason: impl Into<String>) -> Fail {
 
 struct Done {
     code: String,
+    /// Exchange cookie value binding `code` to this browser.
+    binding: String,
     username: String,
     role: Role,
     detail: String,
@@ -665,18 +670,21 @@ impl Sso {
         (now.duration_since(p.created) < LOGIN_TTL).then_some(p)
     }
 
-    /// Store a one-time exchange code for a signed-in user.
-    pub fn put_exchange(&self, username: &str, return_to: &str) -> String {
+    /// Store a one-time exchange code for a signed-in user. Returns the code
+    /// and the browser binding to set as the exchange cookie.
+    pub fn put_exchange(&self, username: &str, return_to: &str) -> (String, String) {
         let code = random_hex(32);
-        let x = Exchange { username: username.into(), return_to: return_to.into(), created: Instant::now() };
+        let binding = random_hex(32);
+        let x = Exchange { username: username.into(), return_to: return_to.into(), binding: binding.clone(), created: Instant::now() };
         insert_bounded(&mut self.exchanges.lock(), code.clone(), x, |x| x.created, EXCHANGE_TTL);
-        code
+        (code, binding)
     }
 
-    /// Redeem an exchange code (once; valid for 60 s).
-    pub fn take_exchange(&self, code: &str, now: Instant) -> Option<Exchange> {
+    /// Redeem an exchange code (once; valid for 60 s) from the browser that
+    /// holds its binding cookie.
+    pub fn take_exchange(&self, code: &str, binding: Option<&str>, now: Instant) -> Option<Exchange> {
         let x = self.exchanges.lock().remove(code)?;
-        (now.duration_since(x.created) < EXCHANGE_TTL).then_some(x)
+        (now.duration_since(x.created) < EXCHANGE_TTL && binding == Some(x.binding.as_str())).then_some(x)
     }
 
     // ------------------------------------------------------------ HTTP
@@ -958,9 +966,10 @@ impl Sso {
             OidcLinkError::Conflict(r) => user_fail("conflict", r),
             OidcLinkError::Other(r) => user_fail("server", r),
         })?;
-        let code = self.put_exchange(&user.username, &p.return_to);
+        let (code, binding) = self.put_exchange(&user.username, &p.return_to);
         Ok(Done {
             code,
+            binding,
             username: user.username,
             role,
             detail: format!("sub={}; groups={}", truncate(sub, 128), groups.len()),
@@ -1015,6 +1024,13 @@ fn cookie_header(base: &str, value: &str, secure: bool, max_age: u64) -> String 
 
 fn error_redirect(base: &str, code: &str) -> Response {
     redirect(&format!("{base}/#/login?sso_error={code}"), cookie_header(base, "", false, 0))
+}
+
+/// Cookie binding an exchange code to the browser that finished sign-in;
+/// sent only to `/api/v1/auth/oidc/…`, where the code is redeemed (OIDC and
+/// SAML alike).
+pub(crate) fn exchange_cookie(base: &str, binding: &str) -> String {
+    cookie_header(base, binding, false, EXCHANGE_TTL.as_secs())
 }
 
 async fn providers(State(st): St) -> Json<Value> {
@@ -1089,7 +1105,8 @@ async fn oidc_callback(State(st): St, req: Request) -> Response {
         Ok(d) => {
             tracing::info!("single sign-on: {} signed in as {}", d.username, d.role.as_str());
             st.audit.record(entry("sso-login", d.username, d.role.as_str(), 303, d.detail));
-            redirect(&format!("{base}/#/sso?code={}", d.code), cookie_header(&base, "", false, 0))
+            // The login cookie becomes the exchange binding (same path).
+            redirect(&format!("{base}/#/sso?code={}", d.code), exchange_cookie(&base, &d.binding))
         }
         Err(f) => {
             tracing::warn!("single sign-on failed ({}): {}", f.code, f.reason);
@@ -1104,15 +1121,17 @@ struct ExchangeReq {
     code: String,
 }
 
-async fn oidc_exchange(State(st): St, Json(r): Json<ExchangeReq>) -> Result<Json<Value>, ApiError> {
+async fn oidc_exchange(State(st): St, headers: HeaderMap, Json(r): Json<ExchangeReq>) -> Result<Json<Value>, ApiError> {
+    let binding = cookie_value(&headers, COOKIE);
     let x = st
         .sso
-        .take_exchange(r.code.trim(), Instant::now())
-        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid or expired sign-in code"))?;
+        .take_exchange(r.code.trim(), binding.as_deref(), Instant::now())
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid or expired sign-in code (sign in again in this browser)"))?;
     let (token, who) = st
         .auth
         .start_session(&x.username)
         .ok_or_else(|| ApiError::new(StatusCode::FORBIDDEN, "account is disabled"))?;
+    // The binding is single-use (removed with the code); its cookie expires in 60 s.
     Ok(Json(json!({ "token": token, "username": who.username, "role": who.role, "return_to": x.return_to })))
 }
 
@@ -1311,14 +1330,25 @@ mod tests {
     #[test]
     fn exchange_codes_are_one_time_and_expire() {
         let s = sso(cfg());
-        let code = s.put_exchange("alice", "/#/x");
-        assert!(s.take_exchange("nope", Instant::now()).is_none());
-        let x = s.take_exchange(&code, Instant::now()).unwrap();
+        let (code, b) = s.put_exchange("alice", "/#/x");
+        assert!(s.take_exchange("nope", Some(&b), Instant::now()).is_none());
+        let x = s.take_exchange(&code, Some(&b), Instant::now()).unwrap();
         assert_eq!((x.username.as_str(), x.return_to.as_str()), ("alice", "/#/x"));
-        assert!(s.take_exchange(&code, Instant::now()).is_none(), "second use refused");
-        let code = s.put_exchange("bob", "/");
-        assert!(s.take_exchange(&code, Instant::now() + Duration::from_secs(61)).is_none(), "expired after 60 s");
-        assert!(s.take_exchange(&code, Instant::now()).is_none(), "an expired code is consumed too");
+        assert!(s.take_exchange(&code, Some(&b), Instant::now()).is_none(), "second use refused");
+        let (code, b) = s.put_exchange("bob", "/");
+        assert!(s.take_exchange(&code, Some(&b), Instant::now() + Duration::from_secs(61)).is_none(), "expired after 60 s");
+        assert!(s.take_exchange(&code, Some(&b), Instant::now()).is_none(), "an expired code is consumed too");
+    }
+
+    /// Login CSRF: a code is only redeemed by the browser that finished the
+    /// sign-in (holding its binding cookie).
+    #[test]
+    fn exchange_codes_are_bound_to_the_browser() {
+        let s = sso(cfg());
+        let (code, _) = s.put_exchange("attacker", "/");
+        assert!(s.take_exchange(&code, None, Instant::now()).is_none(), "no cookie");
+        let (code, _) = s.put_exchange("attacker", "/");
+        assert!(s.take_exchange(&code, Some("someone-elses-cookie"), Instant::now()).is_none(), "wrong cookie");
     }
 
     #[test]

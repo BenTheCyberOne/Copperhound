@@ -456,6 +456,23 @@ impl Graph {
             self.meta.edge_kinds.len() == self.meta.traversable.len(),
             "edge kind table"
         );
+        // Contents, not just lengths: every later access indexes with these
+        // values, so a corrupt or tampered file must fail here, not panic.
+        use rayon::prelude::*;
+        let monotonic = |off: &[u64]| off.par_windows(2).all(|w| w[0] <= w[1]);
+        for (name, off) in [("name.off", &self.name_off), ("oid.off", &self.oid_off), ("props.off", &self.props_off), ("out.off", &self.out_off), ("in.off", &self.in_off)] {
+            ensure!(monotonic(off), "{name} is not monotonic");
+        }
+        let ids_ok = |ids: &[u32]| ids.par_iter().all(|&x| (x as usize) < n);
+        ensure!(ids_ok(&self.out_dst), "out.dst has node ids out of range");
+        ensure!(ids_ok(&self.in_src), "in.src has node ids out of range");
+        ensure!(ids_ok(&self.name_sorted), "name.sorted has node ids out of range");
+        for (name, idx) in [("oid.idx", &self.oid_idx), ("name.idx", &self.name_idx)] {
+            ensure!(idx.par_iter().all(|e| (e.id as usize) < n), "{name} has node ids out of range");
+        }
+        let k = self.meta.edge_kinds.len();
+        let kinds_ok = |ks: &[u16]| ks.par_iter().all(|&x| (x as usize) < k);
+        ensure!(kinds_ok(&self.out_kind) && kinds_ok(&self.in_kind), "edge kinds out of range");
         Ok(())
     }
 
@@ -927,6 +944,42 @@ mod tests {
 
     /// Zero nodes (e.g. an ingest of empty collector files) round-trips:
     /// empty column files map to dangling pointers that must not be cast.
+    /// A tampered graph file is refused at open instead of panicking later.
+    #[test]
+    fn corrupt_graph_files_are_refused() {
+        let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
+        let parts = GraphParts {
+            kinds: vec![1, 2, 3],
+            flags: vec![0; 3],
+            names: vec![Some("A".into()), Some("B".into()), Some("C".into())],
+            oids: vec!["1".into(), "2".into(), "3".into()],
+            props: vec![None; 3],
+            edge_chunks: vec![vec![Edge::new(0, 1, 0), Edge::new(1, 2, 1)]],
+            edge_kinds,
+            traversable,
+            node_kinds: Vec::new(),
+        };
+        let (g, _) = Graph::build(parts).unwrap();
+        let dir = std::env::temp_dir().join(format!("ch-corrupt-graph-{}", std::process::id()));
+        for (file, at, bytes) in [
+            ("out.dst", 0usize, 0x00FF_FFFFu32.to_le_bytes().to_vec()),
+            ("in.src", 0, 0x00FF_FFFFu32.to_le_bytes().to_vec()),
+            ("out.kind", 0, 0xFFFFu16.to_le_bytes().to_vec()),
+            ("name.sorted", 0, 99u32.to_le_bytes().to_vec()),
+            ("out.off", 8, 5u64.to_le_bytes().to_vec()),
+        ] {
+            let _ = std::fs::remove_dir_all(&dir);
+            g.write(&dir).unwrap();
+            assert!(Graph::open(&dir).is_ok());
+            let p = dir.join(file);
+            let mut b = std::fs::read(&p).unwrap();
+            b[at..at + bytes.len()].copy_from_slice(&bytes);
+            std::fs::write(&p, b).unwrap();
+            assert!(Graph::open(&dir).is_err(), "corrupt {file} accepted");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn empty_graph_round_trip() {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();

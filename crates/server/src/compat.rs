@@ -60,7 +60,10 @@ pub struct LoginReq {
     secret: String,
 }
 
-pub async fn login(State(st): St, Json(r): Json<LoginReq>) -> Result<Json<Value>, ApiError> {
+pub async fn login(State(st): St, req: Request) -> Result<Json<Value>, ApiError> {
+    let ip = crate::api::client_ip(&req);
+    let body = axum::body::to_bytes(req.into_body(), 64 << 10).await.map_err(|_| ApiError::bad("body too large"))?;
+    let r: LoginReq = serde_json::from_slice(&body).map_err(|e| ApiError::bad(format!("invalid login request: {e}")))?;
     if r.login_method.as_deref().is_some_and(|m| m != "secret") {
         return Err(ApiError::bad("only login_method \"secret\" is supported"));
     }
@@ -69,6 +72,25 @@ pub async fn login(State(st): St, Json(r): Json<LoginReq>) -> Result<Json<Value>
     let res = tokio::task::spawn_blocking(move || st2.auth.login_with(&u, &p, None, |x| st2.sso.password_login_allowed(&st2.auth, x)))
         .await
         .map_err(|e| ApiError::from(anyhow::anyhow!("login task: {e}")))?;
+    // Audited like /api/v1/login.
+    let audit = |action: &str, status: u16, role: &str| {
+        st.audit.record(crate::audit::AuditEntry {
+            ts: now_rfc3339(),
+            user: r.username.clone(),
+            role: role.into(),
+            action: action.into(),
+            method: "POST".into(),
+            path: "/api/v2/login".into(),
+            status,
+            ip: ip.clone(),
+            detail: None,
+        })
+    };
+    match &res {
+        Ok((_, who)) => audit("login", 200, who.role.as_str()),
+        Err(LoginError::Locked(_)) => audit("login-locked", 429, ""),
+        Err(_) => audit("login-failed", 401, ""),
+    }
     match res {
         Ok((token, who)) => Ok(Json(json!({"data": {"user_id": who.username, "auth_expired": false, "session_token": token}}))),
         Err(LoginError::MfaRequired | LoginError::MfaInvalid) => Err(ApiError::new(

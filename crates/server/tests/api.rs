@@ -1121,6 +1121,11 @@ async fn ldap_collector_targets() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["password_set"], true);
     assert_eq!(v["name"], "corp dc");
+    // Pointing the target elsewhere (or weakening TLS) does not carry the stored password along.
+    let (s, v) = call(&app, put(json!({"id": id, "name":"corp dc","url":"ldaps://attacker.example","bind_dn":"svc@corp.local","interval_hours":24}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "password must be entered again for another server: {v}");
+    let (s, v) = call(&app, put(json!({"id": id, "name":"corp dc","url":"ldaps://dc01.corp.local","bind_dn":"svc@corp.local","insecure_skip_verify":true,"interval_hours":24}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "password must be entered again when certificate checks are turned off: {v}");
     let (_, v) = call(&app, get("/api/v1/collect/ldap", &t)).await;
     assert_eq!(v.as_array().unwrap().len(), 1);
     assert!(!std::fs::read_to_string(data.join("ldap_collect.json")).unwrap().is_empty());

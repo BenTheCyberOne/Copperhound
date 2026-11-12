@@ -430,7 +430,14 @@ pub async fn upsert(State(st): St, Extension(who): Extension<Principal>, Json(r)
             allow_plain: r.allow_plain,
             insecure_skip_verify: r.insecure_skip_verify,
             bind_dn: r.bind_dn.trim().to_string(),
-            password: r.password.filter(|p| !p.is_empty()).unwrap_or(base.password.clone()),
+            // The stored password is reused only for the same server, and
+            // not once TLS protection is weakened (StartTLS off, plain LDAP
+            // or certificate checks turned off).
+            password: r.password.filter(|p| !p.is_empty()).unwrap_or_else(|| {
+                let same_server = crate::notify::same_origin(&base.url, r.url.trim());
+                let weakened = (base.starttls && !r.starttls) || (!base.allow_plain && r.allow_plain) || (!base.insecure_skip_verify && r.insecure_skip_verify);
+                if same_server && !weakened { base.password.clone() } else { String::new() }
+            }),
             base_dn: r.base_dn.trim().to_string(),
             include_configuration: r.include_configuration,
             interval_hours: r.interval_hours,

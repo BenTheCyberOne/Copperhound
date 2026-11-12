@@ -1384,6 +1384,7 @@ A subset of BloodHound CE's API, so existing upload tooling works unchanged:
 | `COPPERHOUND_TLS_HOSTNAMES` | comma-separated host names for the self-signed certificate |
 | `COPPERHOUND_ADMIN_PASSWORD` | password of the built-in `admin` (authoritative when set; else generated at first start and stored in the data directory) |
 | `COPPERHOUND_WATCH_DIR` | enables the [watch folder](#settings-and-watch-folder-admin) on first start, at this path |
+| `COPPERHOUND_MAX_SIGNED_BODY_MB` | largest body of a `bhesignature`-signed request, read before its signature can be checked (default 4096) |
 | `COPPERHOUND_PUBLIC_URL` | external base URL, e.g. `https://copperhound.corp.example`: `link` in notifications, derived OIDC redirect URL and SAML SP entity ID / ACS URL |
 | `COPPERHOUND_OIDC_*` | OIDC configuration overrides (below) |
 | `COPPERHOUND_OIDC_CA_FILE` | PEM bundle of extra trusted CAs for an internal IdP |

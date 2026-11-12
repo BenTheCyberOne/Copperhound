@@ -150,7 +150,18 @@ async fn saml_sign_in_end_to_end() {
     assert_eq!(s, StatusCode::SEE_OTHER);
     let to = h[header::LOCATION].to_str().unwrap().to_string();
     let code = to.split("code=").nth(1).unwrap_or_else(|| panic!("sign-in failed: {to}"));
-    let (s, _, v) = send(&app, json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({"code": code}))).await;
+    // Redeemed by the same browser: it holds the exchange cookie set with the code.
+    let xc = h
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .filter_map(|c| c.split(';').next())
+        .find(|c| c.starts_with("ch_oidc=") && c.len() > 8)
+        .expect("exchange cookie")
+        .to_string();
+    let mut req = json_req("POST", "/api/v1/auth/oidc/exchange", None, json!({"code": code}));
+    req.headers_mut().insert(header::COOKIE, xc.parse().unwrap());
+    let (s, _, v) = send(&app, req).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["username"], "carol@example.com");
     assert_eq!(v["role"], "analyst");

@@ -5,6 +5,7 @@ import { Modal } from "../../../components/Modal";
 import { KEEP_SECRET, SecretField, secretPayload, type SecretEdit } from "../../../components/SecretField";
 import { EmptyState } from "../../../components/StatusView";
 import { useApp } from "../../../state/AppContext";
+import { webHref } from "../../../util/format";
 
 const LABEL: Record<TicketTargetType, string> = { jira: "Jira", servicenow: "ServiceNow", webhook: "Webhook" };
 
@@ -259,8 +260,8 @@ export function TicketingTab() {
             {log.slice(0, 50).map((r, i) => (
               <tr key={`${r.key}-${r.at}-${i}`}>
                 <td>
-                  {r.url ? (
-                    <a href={r.url} target="_blank" rel="noreferrer noopener">
+                  {webHref(r.url) ? (
+                    <a href={webHref(r.url)} target="_blank" rel="noreferrer noopener">
                       {r.key}
                     </a>
                   ) : (

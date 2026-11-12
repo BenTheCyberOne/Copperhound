@@ -339,11 +339,8 @@ impl Auth {
         allowed: impl Fn(&User) -> bool,
     ) -> Result<(String, Principal), LoginError> {
         let key = username.to_ascii_lowercase();
-        let now = Instant::now();
-        if let Some(&(n, last)) = self.failures.lock().get(&key) {
-            if n >= MAX_FAILURES && now.duration_since(last) < LOCKOUT {
-                return Err(LoginError::Locked((LOCKOUT - now.duration_since(last)).as_secs().max(1)));
-            }
+        if let Some(secs) = self.locked(&key) {
+            return Err(LoginError::Locked(secs));
         }
         let user = self.users.read().iter().find(|u| u.username.eq_ignore_ascii_case(username)).cloned();
         let ok = match &user {
@@ -354,13 +351,7 @@ impl Auth {
             }
         };
         if !ok {
-            let mut f = self.failures.lock();
-            let e = f.entry(key).or_insert((0, now));
-            if now.duration_since(e.1) >= LOCKOUT {
-                e.0 = 0;
-            }
-            e.0 += 1;
-            e.1 = now;
+            self.fail(&key);
             return Err(LoginError::Invalid);
         }
         let user = user.expect("checked");
@@ -373,18 +364,36 @@ impl Auth {
                 return Err(LoginError::MfaRequired);
             };
             if !self.check_second_factor(&user.username, code) {
-                let mut f = self.failures.lock();
-                let e = f.entry(key).or_insert((0, now));
-                if now.duration_since(e.1) >= LOCKOUT {
-                    e.0 = 0;
-                }
-                e.0 += 1;
-                e.1 = now;
+                self.fail(&key);
                 return Err(LoginError::MfaInvalid);
             }
         }
         self.failures.lock().remove(&key);
         self.start_session(&user.username).ok_or(LoginError::Invalid)
+    }
+
+    /// Seconds left while `key` is locked out after repeated failures.
+    fn locked(&self, key: &str) -> Option<u64> {
+        let now = Instant::now();
+        let f = self.failures.lock();
+        let &(n, last) = f.get(key)?;
+        (n >= MAX_FAILURES && now.duration_since(last) < LOCKOUT).then(|| (LOCKOUT - now.duration_since(last)).as_secs().max(1))
+    }
+
+    /// Count a failed attempt for `key`.
+    fn fail(&self, key: &str) {
+        let now = Instant::now();
+        let mut f = self.failures.lock();
+        // Forget expired entries so guesses at random names cannot grow the map without bound.
+        if f.len() > 10_000 {
+            f.retain(|_, e| now.duration_since(e.1) < LOCKOUT);
+        }
+        let e = f.entry(key.to_string()).or_insert((0, now));
+        if now.duration_since(e.1) >= LOCKOUT {
+            e.0 = 0;
+        }
+        e.0 += 1;
+        e.1 = now;
     }
 
     /// Accept a TOTP code (once per time step) or consume a recovery code.
@@ -462,10 +471,19 @@ impl Auth {
     }
 
     /// Turn two-factor sign-in off after checking a current code (or a recovery code).
+    /// Turn off two-factor sign-in with a current code. Wrong codes count
+    /// toward a lockout like sign-in does (separately, so a held session
+    /// cannot lock the account out of signing in).
     pub fn mfa_disable(&self, username: &str, code: &str) -> Result<()> {
+        let key = format!("mfa-disable:{}", username.to_ascii_lowercase());
+        if let Some(secs) = self.locked(&key) {
+            bail!("too many wrong codes; try again in {secs} s");
+        }
         if !self.check_second_factor(username, code) {
+            self.fail(&key);
             bail!("that code is not valid");
         }
+        self.failures.lock().remove(&key);
         self.mfa_reset(username)
     }
 
@@ -814,6 +832,23 @@ mod tests {
         assert!(a.check(&t).is_some());
         a.logout(&t);
         assert!(a.check(&t).is_none());
+    }
+
+    #[test]
+    fn mfa_disable_wrong_codes_lock_out() {
+        use crate::mfa::{base32_decode, code_at, STEP_SECS};
+        let a = Auth::with_password("s3cret-password".into());
+        let secret = a.mfa_setup("admin").unwrap();
+        let step = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() / STEP_SECS;
+        let recovery = a.mfa_enable("admin", &format!("{:06}", code_at(&base32_decode(&secret).unwrap(), step))).unwrap();
+        for _ in 0..MAX_FAILURES {
+            assert!(a.mfa_disable("admin", "000000").is_err());
+        }
+        let e = a.mfa_disable("admin", &recovery[0]).unwrap_err();
+        assert!(e.to_string().contains("too many"), "{e}");
+        assert!(a.mfa_status("admin").unwrap().0, "still enabled");
+        // Sign-in has its own counter.
+        assert!(a.login_with("admin", "s3cret-password", Some(&recovery[1]), |_| true).is_ok());
     }
 
     #[test]

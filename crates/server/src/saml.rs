@@ -265,6 +265,8 @@ fn fail(code: &'static str, reason: impl Into<String>) -> Fail {
 
 struct Done {
     code: String,
+    /// Exchange cookie value binding `code` to this browser.
+    binding: String,
     username: String,
     role: Role,
     detail: String,
@@ -331,8 +333,8 @@ fn complete(sso: &sso::Sso, auth: &Auth, p: Pending, cookie: Option<String>, b64
         OidcLinkError::Conflict(r) => user_fail("conflict", r),
         OidcLinkError::Other(r) => user_fail("server", r),
     })?;
-    let code = sso.put_exchange(&user.username, &p.return_to);
-    Ok(Done { code, username: user.username, role, detail: format!("saml nameid={}; groups={}", v.name_id.chars().take(128).collect::<String>(), groups.len()) })
+    let (code, binding) = sso.put_exchange(&user.username, &p.return_to);
+    Ok(Done { code, binding, username: user.username, role, detail: format!("saml nameid={}; groups={}", v.name_id.chars().take(128).collect::<String>(), groups.len()) })
 }
 
 // ------------------------------------------------------------- routes
@@ -361,14 +363,19 @@ fn cookie(base: &str, value: &str, max_age: u64) -> String {
 }
 
 fn redirect(location: &str, set_cookie: String) -> Response {
-    Response::builder()
+    redirect_cookies(location, &[set_cookie])
+}
+
+fn redirect_cookies(location: &str, set_cookies: &[String]) -> Response {
+    let mut b = Response::builder()
         .status(StatusCode::SEE_OTHER)
         .header(header::LOCATION, location)
         .header(header::CACHE_CONTROL, "no-store")
-        .header(header::REFERRER_POLICY, "no-referrer")
-        .header(header::SET_COOKIE, set_cookie)
-        .body(Body::empty())
-        .unwrap_or_else(|_| Response::new(Body::from("redirect failed")))
+        .header(header::REFERRER_POLICY, "no-referrer");
+    for c in set_cookies {
+        b = b.header(header::SET_COOKIE, c);
+    }
+    b.body(Body::empty()).unwrap_or_else(|_| Response::new(Body::from("redirect failed")))
 }
 
 fn error_redirect(base: &str, code: &str) -> Response {
@@ -450,7 +457,8 @@ async fn acs(State(st): St, req: Request) -> Response {
         Ok(d) => {
             tracing::info!("SAML sign-on: {} signed in as {}", d.username, d.role.as_str());
             st.audit.record(entry("sso-login", d.username, d.role.as_str(), d.detail));
-            redirect(&format!("{base}/#/sso?code={}", d.code), cookie(&base, "", 0))
+            // Clear the SAML login cookie; bind the exchange code to this browser.
+            redirect_cookies(&format!("{base}/#/sso?code={}", d.code), &[cookie(&base, "", 0), sso::exchange_cookie(&base, &d.binding)])
         }
         Err(f) => {
             tracing::warn!("SAML sign-on failed ({}): {}", f.code, f.reason);

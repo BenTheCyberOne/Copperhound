@@ -144,6 +144,7 @@ pub fn merge_target(old: Option<&Target>, i: TargetIn) -> Result<Target, String>
         _ => i.url.trim().trim_end_matches('/').to_string(),
     };
     validate_http_url(&url).map_err(|e| format!("target '{name}': {e}"))?;
+    let kept_token = old.filter(|o| crate::notify::same_origin(&o.url, &url)).map(|o| o.token.clone()).unwrap_or_default();
     let mut t = Target {
         id,
         name: name.clone(),
@@ -151,7 +152,8 @@ pub fn merge_target(old: Option<&Target>, i: TargetIn) -> Result<Target, String>
         enabled: i.enabled.unwrap_or(true),
         url,
         username: i.username.unwrap_or_default().trim().to_string(),
-        token: i.token.unwrap_or_else(|| old.map(|o| o.token.clone()).unwrap_or_default()),
+        // The stored token goes only to the origin it was entered for.
+        token: i.token.unwrap_or(kept_token),
         project: i.project.unwrap_or_default().trim().to_string(),
         issue_type: i.issue_type.unwrap_or_default().trim().to_string(),
         table: i.table.unwrap_or_default().trim().to_string(),
@@ -416,15 +418,31 @@ pub async fn create_one(t: &Target, title: &str, items: &[FixItem], note: &str) 
             });
             let v = post(t, &t.url, &body, "remediation.ticket").await?;
             let key = ["key", "id", "number"].iter().find_map(|k| v[*k].as_str().map(str::to_string).or_else(|| v[*k].as_u64().map(|n| n.to_string())));
-            Ok(Created { key: key.unwrap_or_else(|| "sent".into()), url: v["url"].as_str().map(str::to_string) })
+            // The receiver's link is shown as a link: only web URLs.
+            let url = v["url"].as_str().map(str::trim).filter(|u| validate_http_url(u).is_ok()).map(str::to_string);
+            Ok(Created { key: key.unwrap_or_else(|| "sent".into()), url })
         }
     }
 }
 
 // ------------------------------------------------------------ handlers
 
-pub async fn get_targets(State(st): St) -> Json<Value> {
-    Json(Value::Array(load(&st).iter().map(target_public).collect()))
+/// Everyone may list targets (to hand off to them); a webhook URL is a
+/// secret, so only admins see it in full, others get its host.
+pub async fn get_targets(State(st): St, axum::Extension(who): axum::Extension<crate::auth::Principal>) -> Json<Value> {
+    let admin = who.role == crate::auth::Role::Admin;
+    Json(Value::Array(
+        load(&st)
+            .iter()
+            .map(|t| {
+                let mut v = target_public(t);
+                if !admin && t.kind == TargetKind::Webhook {
+                    v["url"] = json!(crate::notify::url_hint(&t.url));
+                }
+                v
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Deserialize)]

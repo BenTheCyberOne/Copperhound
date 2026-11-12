@@ -280,7 +280,9 @@ pub async fn require_auth(State(st): St, req: Request, next: Next) -> Response {
     }
     req.extensions_mut().insert(who.clone());
     let resp = next.run(req).await;
-    if method != axum::http::Method::GET {
+    // Changes, plus reads that export credentials or the audit trail itself.
+    let sensitive_read = matches!(template.strip_prefix("/api/v1").unwrap_or(&template), "/backup" | "/audit");
+    if method != axum::http::Method::GET || sensitive_read {
         let action = template.strip_prefix("/api/v1").unwrap_or(&template).to_string();
         st.audit.record(AuditEntry {
             ts: now_rfc3339(),

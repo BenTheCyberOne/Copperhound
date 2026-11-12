@@ -152,7 +152,7 @@ fn yes() -> bool {
 }
 
 /// `scheme://host[:port]/…` — enough to recognise a URL without leaking its token.
-fn url_hint(url: &str) -> Option<String> {
+pub(crate) fn url_hint(url: &str) -> Option<String> {
     let u = reqwest::Url::parse(url).ok()?;
     let host = u.host_str()?;
     Some(match u.port() {
@@ -223,6 +223,20 @@ pub struct ChannelIn {
     pub email_to: Option<Vec<String>>,
 }
 
+/// Same scheme, host and port: a stored secret may be reused for the new
+/// URL only then, so changing a target's address cannot send the old
+/// credentials elsewhere.
+pub fn same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a.trim()), url::Url::parse(b.trim())) {
+        (Ok(x), Ok(y)) => {
+            x.scheme() == y.scheme()
+                && x.host_str().map(str::to_ascii_lowercase) == y.host_str().map(str::to_ascii_lowercase)
+                && x.port_or_known_default() == y.port_or_known_default()
+        }
+        _ => false,
+    }
+}
+
 /// A failed request, without the URL: webhook URLs are secrets, and these
 /// messages are stored in delivery and alert history that analysts read.
 pub fn request_error(e: reqwest::Error) -> String {
@@ -262,6 +276,11 @@ pub fn merge_channel(old: Option<&Channel>, i: ChannelIn) -> Result<Channel, Str
     let old = old.filter(|o| o.kind == i.kind);
     let keep = |new: Option<String>, old: Option<&String>| new.unwrap_or_else(|| old.cloned().unwrap_or_default());
     let security = i.smtp_security.or(old.map(|o| o.smtp_security)).unwrap_or_default();
+    let same_smtp = old.is_some_and(|o| {
+        i.smtp_host.as_deref().map(str::trim).is_some_and(|h| h.eq_ignore_ascii_case(o.smtp_host.trim()))
+            && i.smtp_port.unwrap_or(0) == o.smtp_port
+            && security == o.smtp_security
+    });
     let mut c = Channel {
         id,
         name,
@@ -274,7 +293,8 @@ pub fn merge_channel(old: Option<&Channel>, i: ChannelIn) -> Result<Channel, Str
         smtp_port: i.smtp_port.unwrap_or(0),
         smtp_security: security,
         smtp_username: i.smtp_username.unwrap_or_default().trim().to_string(),
-        smtp_password: keep(i.smtp_password, old.map(|o| &o.smtp_password)),
+        // The stored password goes only to the server it was entered for.
+        smtp_password: keep(i.smtp_password, old.filter(|_| same_smtp).map(|o| &o.smtp_password)),
         email_from: i.email_from.unwrap_or_default().trim().to_string(),
         email_to: i.email_to.unwrap_or_default().into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
     };
@@ -685,6 +705,16 @@ pub async fn test_channel(State(st): St, Path(id): Path<String>) -> Result<Json<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_origin_rules() {
+        assert!(same_origin("https://jira.corp/rest", "https://JIRA.corp:443/other"));
+        assert!(!same_origin("https://jira.corp", "https://jira.corp.evil.example"));
+        assert!(!same_origin("https://jira.corp", "http://jira.corp"));
+        assert!(!same_origin("https://jira.corp", "https://jira.corp:8443"));
+        assert!(!same_origin("ldaps://dc01", "ldaps://dc02"));
+        assert!(!same_origin("not a url", "not a url"));
+    }
 
     /// Delivery errors are stored where analysts read them: no webhook URL.
     #[tokio::test]

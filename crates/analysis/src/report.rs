@@ -218,6 +218,7 @@ pub fn render_html(r: &ReportInput) -> String {
     let _ = write!(
         h,
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">\
          <title>{}</title><style>{CSS}</style></head><body><main>",
         esc(r.title)
     );
@@ -374,7 +375,7 @@ pub fn render_html(r: &ReportInput) -> String {
                     "<tr><td>{}</td><td>{} <span class=\"muted\">({}){}</span></td><td><code>{}</code>{more}</td><td class=\"n\">{}</td><td class=\"n\">{:.1}%</td></tr>",
                     i + 1,
                     esc(g.name(s.node)),
-                    g.kind_name(s.node),
+                    esc(g.kind_name(s.node)),
                     if s.needs_window { " · maintenance window" } else { "" },
                     edges.join("<br>"),
                     num(s.principals_cut),
@@ -427,8 +428,16 @@ pub fn render_html(r: &ReportInput) -> String {
 
 // ----------------------------------------------------------- Markdown
 
+/// A Markdown table cell: no column breaks, newlines or raw HTML.
 fn md_cell(s: &str) -> String {
-    s.replace('|', "\\|").replace('\n', " ")
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('|', "\\|").replace(['\n', '\r'], " ")
+}
+
+/// A code fence longer than any backtick run in `lines`, so collected names
+/// cannot close it.
+fn md_fence(lines: &[String]) -> String {
+    let longest = lines.iter().flat_map(|l| l.split(|c| c != '`').map(str::len)).max().unwrap_or(0);
+    "`".repeat(longest.max(2) + 1)
 }
 
 pub fn render_markdown(r: &ReportInput) -> String {
@@ -465,7 +474,7 @@ pub fn render_markdown(r: &ReportInput) -> String {
         let _ = writeln!(m, "\n## Remediation plan\n\n| # | Sever | Cuts | Total cut |\n|---:|---|---:|---:|");
         for (i, s) in p.steps.iter().enumerate() {
             let window = if s.needs_window { ", maintenance window" } else { "" };
-            let _ = writeln!(m, "| {} | {} ({}{window}) | {} | {:.1}% |", i + 1, md_cell(g.name(s.node)), g.kind_name(s.node), num(s.principals_cut), s.cumulative_reduction_percent);
+            let _ = writeln!(m, "| {} | {} ({}{window}) | {} | {:.1}% |", i + 1, md_cell(g.name(s.node)), md_cell(g.kind_name(s.node)), num(s.principals_cut), s.cumulative_reduction_percent);
         }
     }
     if !r.accepted.is_empty() {
@@ -491,14 +500,15 @@ pub fn render_markdown(r: &ReportInput) -> String {
             let _ = writeln!(m, "MITRE ATT&CK: {}\n", f.def.mitre.join(", "));
         }
         let lines = item_lines(g, f, r.items_per_finding);
-        m.push_str("```\n");
+        let fence = md_fence(&lines);
+        let _ = writeln!(m, "{fence}");
         for l in &lines {
             let _ = writeln!(m, "{l}");
         }
         if f.items.len() > lines.len() {
             let _ = writeln!(m, "… and {} more", num((f.items.len() - lines.len()) as u64));
         }
-        m.push_str("```\n");
+        let _ = writeln!(m, "{fence}");
     }
     m
 }

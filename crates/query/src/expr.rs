@@ -562,7 +562,10 @@ impl CExpr {
                     _ => false,
                 })
             }
-            CExpr::Arith(a, op, b) => arith(g, a.eval(env), *op, b.eval(env)),
+            CExpr::Arith(a, op, b) => {
+                let (x, y) = (a.eval(env), b.eval(env));
+                arith(env.cx, x, *op, y)
+            }
             CExpr::Neg(a) => match a.eval(env).as_num() {
                 Some(n) => Val::Num(-n),
                 None => Val::Null,
@@ -573,6 +576,9 @@ impl CExpr {
                 let Some(xs) = list_of(list.eval(env)) else { return Val::Null };
                 let mut n = 0usize;
                 for x in xs {
+                    if env.cx.cancel.hit() {
+                        return Val::Null;
+                    }
                     env.set_local(*slot, x);
                     if pred.test(env) {
                         n += 1;
@@ -596,6 +602,9 @@ impl CExpr {
                 let Some(xs) = list_of(list.eval(env)) else { return Val::Null };
                 let mut out = Vec::new();
                 for x in xs {
+                    if env.cx.cancel.hit() || !env.cx.cancel.charge(1) {
+                        return Val::Null;
+                    }
                     env.set_local(*slot, x.clone());
                     if pred.as_ref().is_none_or(|p| p.test(env)) {
                         out.push(match map {
@@ -727,6 +736,9 @@ impl CExpr {
                     } else {
                         s.split(d.as_str()).map(|p| Val::Str(p.to_string())).take(MAX_LIST).collect()
                     };
+                    if !env.cx.cancel.charge(parts.len() + str_units(s.len())) {
+                        return Val::Null;
+                    }
                     Val::List(parts)
                 }
                 _ => Val::Null,
@@ -748,7 +760,14 @@ impl CExpr {
                 Val::Str(if f == Func::Left { cs[..n].iter().collect() } else { cs[cs.len() - n..].iter().collect() })
             }
             Func::Replace => match (&a0, &av[1], &av[2]) {
-                (Val::Str(s), Val::Str(a), Val::Str(b)) if !a.is_empty() => Val::Str(s.replace(a.as_str(), b)),
+                (Val::Str(s), Val::Str(a), Val::Str(b)) if !a.is_empty() => {
+                    // Output size before building it: each match grows the string by |b| - |a|.
+                    let grow = b.len().saturating_sub(a.len()).saturating_mul(s.matches(a.as_str()).count());
+                    if !env.cx.cancel.charge(str_units(s.len().saturating_add(grow))) {
+                        return Val::Null;
+                    }
+                    Val::Str(s.replace(a.as_str(), b))
+                }
                 (Val::Str(s), _, _) => Val::Str(s.clone()),
                 _ => Val::Null,
             },
@@ -819,6 +838,9 @@ impl CExpr {
                     if out.len() >= MAX_LIST {
                         break;
                     }
+                    if env.cx.cancel.hit() || !env.cx.cancel.charge(1) {
+                        return Val::Null;
+                    }
                     out.push(Val::Num(x));
                     x += step;
                 }
@@ -834,26 +856,44 @@ impl CExpr {
     }
 }
 
-fn arith(g: &Graph, a: Val, op: ArOp, b: Val) -> Val {
+/// Budget units for a string of `bytes` bytes.
+fn str_units(bytes: usize) -> usize {
+    bytes / 32 + 1
+}
+
+fn arith(cx: &crate::exec::Ctx, a: Val, op: ArOp, b: Val) -> Val {
+    let g = cx.g;
     if a.is_null() || b.is_null() {
         return Val::Null;
     }
     if op == ArOp::Add {
         match (a, b) {
             (Val::List(mut x), Val::List(y)) => {
+                if x.len() + y.len() > MAX_LIST || !cx.cancel.charge(x.len() + y.len()) {
+                    return Val::Null;
+                }
                 x.extend(y);
                 return Val::List(x);
             }
             (Val::List(mut x), y) => {
+                if x.len() >= MAX_LIST || !cx.cancel.charge(x.len() + 1) {
+                    return Val::Null;
+                }
                 x.push(y);
                 return Val::List(x);
             }
             (x, Val::List(mut y)) => {
+                if y.len() >= MAX_LIST || !cx.cancel.charge(y.len() + 1) {
+                    return Val::Null;
+                }
                 y.insert(0, x);
                 return Val::List(y);
             }
             (x @ Val::Str(_), y) | (x, y @ Val::Str(_)) => {
                 let (Val::Str(p), Val::Str(q)) = (to_string(g, &x), to_string(g, &y)) else { return Val::Null };
+                if !cx.cancel.charge(str_units(p.len() + q.len())) {
+                    return Val::Null;
+                }
                 return Val::Str(p + &q);
             }
             (x, y) => return arith_num(x.as_num(), op, y.as_num()),

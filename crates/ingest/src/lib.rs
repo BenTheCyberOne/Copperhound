@@ -211,6 +211,29 @@ fn mtime(p: &Path) -> Option<String> {
     Some(merge::rfc3339(secs))
 }
 
+/// Largest expansion accepted from compressed input: collector JSON and LDIF
+/// compress 10-30x, decompression bombs 1000x and more.
+pub const MAX_EXPANSION: u64 = 200;
+/// Compressed inputs smaller than this may always expand to it.
+pub const MIN_EXPANSION_BYTES: u64 = 64 << 20;
+/// Entries read from one zip archive.
+pub const MAX_ZIP_ENTRIES: usize = 100_000;
+
+/// Bytes `compressed` input may expand to.
+pub fn expansion_limit(compressed: u64) -> u64 {
+    compressed.saturating_mul(MAX_EXPANSION).max(MIN_EXPANSION_BYTES)
+}
+
+/// Copy at most `limit` bytes; fail (instead of filling the disk) when the
+/// input has more.
+pub fn copy_limited(r: impl std::io::Read, w: &mut impl Write, limit: u64, what: &str) -> Result<u64> {
+    let n = std::io::copy(&mut r.take(limit.saturating_add(1)), w)?;
+    if n > limit {
+        bail!("{what} expands to more than {limit} bytes ({MAX_EXPANSION}x its compressed size): refusing a likely decompression bomb");
+    }
+    Ok(n)
+}
+
 /// Extract wanted entries; each becomes a source. Returns `(path, source)`.
 fn extract_zips(zips: &[InFile], tmp: &Path, sources: &mut Vec<SourceInfo>) -> Result<Vec<(PathBuf, u32)>> {
     let mut jobs = Vec::new();
@@ -218,6 +241,9 @@ fn extract_zips(zips: &[InFile], tmp: &Path, sources: &mut Vec<SourceInfo>) -> R
         let mut a = zip::ZipArchive::new(BufReader::new(File::open(&z.path)?))
             .with_context(|| format!("opening zip {}", z.path.display()))?;
         let zip_mtime = mtime(&z.path);
+        if a.len() > MAX_ZIP_ENTRIES {
+            bail!("{}: {} entries (at most {MAX_ZIP_ENTRIES})", z.path.display(), a.len());
+        }
         for i in 0..a.len() {
             let e = a.by_index_raw(i)?;
             if !e.is_dir() && wanted_zip_entry(e.name()) {
@@ -253,10 +279,20 @@ fn extract_zips(zips: &[InFile], tmp: &Path, sources: &mut Vec<SourceInfo>) -> R
             }
         }
     }
+    // Output budget per archive (overlapping entries can share compressed data).
+    let budgets: Vec<std::sync::atomic::AtomicU64> = zips
+        .iter()
+        .map(|z| std::sync::atomic::AtomicU64::new(expansion_limit(fs::metadata(&z.path).map(|m| m.len()).unwrap_or(0))))
+        .collect();
     jobs.par_iter()
-        .map(|(zi, i, base, src)| -> Result<(PathBuf, u32)> {
+        // One open archive per worker and zip: re-reading the central
+        // directory for every entry is quadratic in the entry count.
+        .map_init(std::collections::HashMap::<usize, zip::ZipArchive<BufReader<File>>>::new, |open, (zi, i, base, src)| -> Result<(PathBuf, u32)> {
             let z = &zips[*zi].path;
-            let mut a = zip::ZipArchive::new(BufReader::new(File::open(z)?))?;
+            let a = match open.entry(*zi) {
+                std::collections::hash_map::Entry::Occupied(o) => o.into_mut(),
+                std::collections::hash_map::Entry::Vacant(v) => v.insert(zip::ZipArchive::new(BufReader::new(File::open(z)?))?),
+            };
             let mut e = a.by_index(*i).with_context(|| {
                 format!(
                     "reading {} from {} (encrypted zips are not supported)",
@@ -264,10 +300,16 @@ fn extract_zips(zips: &[InFile], tmp: &Path, sources: &mut Vec<SourceInfo>) -> R
                     z.display()
                 )
             })?;
+            let what = format!("{base} in {}", z.display());
+            let limit = expansion_limit(e.compressed_size()).min(budgets[*zi].load(std::sync::atomic::Ordering::Relaxed));
             let out = tmp.join(format!("{zi}_{i}_{base}"));
             let mut w = BufWriter::with_capacity(1 << 20, File::create(&out)?);
-            std::io::copy(&mut e, &mut w)?;
+            let n = copy_limited(&mut e, &mut w, limit, &what)?;
             w.flush()?;
+            let relaxed = std::sync::atomic::Ordering::Relaxed;
+            if budgets[*zi].try_update(relaxed, relaxed, |b| b.checked_sub(n)).is_err() {
+                bail!("{}: entries expand to more than {MAX_EXPANSION}x the archive size: refusing a likely decompression bomb", z.display());
+            }
             Ok((out, *src))
         })
         .collect()
@@ -603,6 +645,9 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
     }
     report.extract_secs = t.elapsed().as_secs_f64();
     if json_files.is_empty() && ldap_inputs.is_empty() {
+        if let Some(e) = ldap_errors.lock().first() {
+            bail!("no readable collector files: {e}");
+        }
         bail!("no collector files (.json, .zip, LDIF or AD Explorer snapshot) found in the given inputs");
     }
 

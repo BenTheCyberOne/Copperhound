@@ -270,7 +270,13 @@ fn gunzip_ldif(path: &Path, tmp: &Path) -> Result<Option<PathBuf>> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let out = tmp.join(format!("gz{nanos}_{}", base.trim_end_matches(".gz")));
     let mut w = BufWriter::with_capacity(1 << 20, File::create(&out)?);
-    std::io::copy(&mut open()?, &mut w).with_context(|| format!("decompressing {}", path.display()))?;
+    let limit = crate::expansion_limit(std::fs::metadata(path)?.len());
+    let res = crate::copy_limited(open()?, &mut w, limit, &path.display().to_string()).with_context(|| format!("decompressing {}", path.display()));
+    if let Err(e) = res {
+        drop(w);
+        let _ = std::fs::remove_file(&out);
+        return Err(e);
+    }
     w.flush()?;
     Ok(Some(out))
 }

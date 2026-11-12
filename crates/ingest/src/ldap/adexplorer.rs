@@ -105,10 +105,14 @@ pub fn looks_like(head: &[u8], len: u64) -> bool {
     server_ok && first_ok
 }
 
-fn utf16z(b: &[u8], o: usize) -> Option<String> {
+/// NUL-terminated UTF-16 at `o`, at most `max_bytes` long.
+fn utf16z(b: &[u8], o: usize, max_bytes: usize) -> Option<String> {
     let mut units = Vec::new();
     let mut p = o;
     loop {
+        if p - o >= max_bytes {
+            return None;
+        }
         let u = u16::from_le_bytes(b.get(p..p + 2)?.try_into().ok()?);
         if u == 0 {
             break;
@@ -226,6 +230,11 @@ impl Snapshot {
             return None;
         }
         let mut e = Entry::default();
+        // Values lie inside their object and each is stored once, so the
+        // text decoded from one object never exceeds its size; offsets that
+        // point many values at the same long string are malformed.
+        let ob = b.get(..off + size)?;
+        let mut budget = size;
         for t in 0..table {
             let idx = u32_at(obj, 8 + t * 8)? as usize;
             let rel = u32_at(obj, 12 + t * 8)? as i32 as i64;
@@ -235,10 +244,12 @@ impl Snapshot {
                 continue;
             }
             let at = off as i64 + rel;
-            if at < 0 || at as usize >= b.len() {
+            if at < 0 || at as usize >= ob.len() {
                 return None;
             }
-            let vals = values(b, at as usize, p.ads)?;
+            // Only the first DN value is used unless the attribute is wanted.
+            let max = if wanted.is_some() { usize::MAX } else { 1 };
+            let vals = values(ob, at as usize, p.ads, max, &mut budget)?;
             if p.is_dn {
                 if let Some(Cow::Owned(v)) = vals.first() {
                     e.dn = Cow::Owned(String::from_utf8_lossy(v).into_owned());
@@ -252,20 +263,25 @@ impl Snapshot {
     }
 }
 
-/// Decode the value block at `at` into LDAP-text / raw-binary values.
-fn values(b: &[u8], at: usize, ads: u32) -> Option<Vec<Cow<'_, [u8]>>> {
+/// Decode the value block at `at` into LDAP-text / raw-binary values: at
+/// most `max` of them, and strings only while `budget` (bytes of UTF-16
+/// decoded from this object) lasts.
+fn values<'a>(b: &'a [u8], at: usize, ads: u32, max: usize, budget: &mut usize) -> Option<Vec<Cow<'a, [u8]>>> {
     let n = u32_at(b, at)? as usize;
     if n > (b.len() - at) / 2 {
         return None;
     }
-    let mut out = Vec::with_capacity(n);
+    let n_read = n.min(max);
+    let mut out = Vec::with_capacity(n_read.min(1024));
     let base = at + 4;
     match ads {
         ADS_DN_STRING | ADS_CASE_EXACT_STRING | ADS_CASE_IGNORE_STRING | ADS_PRINTABLE_STRING | ADS_NUMERIC_STRING
         | ADS_OBJECT_CLASS => {
-            for i in 0..n {
+            for i in 0..n_read {
                 let rel = u32_at(b, base + 4 * i)? as usize;
-                out.push(Cow::Owned(utf16z(b, at + rel)?.into_bytes()));
+                let s = utf16z(b, at.checked_add(rel)?, *budget)?;
+                *budget = budget.checked_sub(2 * s.encode_utf16().count() + 2)?;
+                out.push(Cow::Owned(s.into_bytes()));
             }
         }
         ADS_OCTET_STRING => {

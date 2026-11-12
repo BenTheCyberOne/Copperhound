@@ -22,9 +22,20 @@ pub struct FixEnd<'a> {
     pub kind: &'a str,
 }
 
-/// PowerShell single-quoted string literal.
+/// PowerShell single-quoted string literal. PowerShell also ends single-
+/// quoted strings at the typographic quotes U+2018-U+201B, so every one of
+/// them is doubled, not just the ASCII quote; names are collected data.
 fn q(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 /// The SID in a node object id: `S-1-…`, or a domain-prefixed well-known SID
@@ -374,6 +385,15 @@ Get-MgRoleManagementDirectoryRoleEligibilitySchedule -Filter \"principalId eq {p
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoting_covers_typographic_quotes() {
+        assert_eq!(q("it's"), "'it''s'");
+        assert_eq!(q("WS01\u{2019}; calc #"), "'WS01\u{2019}\u{2019}; calc #'");
+        for c in ['\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'] {
+            assert_eq!(q(&format!("a{c}b")), format!("'a{c}{c}b'"));
+        }
+    }
 
     fn end<'a>(oid: &'a str, name: &'a str, kind: &'a str) -> FixEnd<'a> {
         FixEnd { oid, name, kind }

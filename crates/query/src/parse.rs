@@ -727,25 +727,51 @@ impl<'s> Parser<'s> {
         r
     }
 
+    /// Every node the loop below adds nests the tree one level deeper:
+    /// counted against MAX_DEPTH, restored when the chain ends.
     fn or_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.or_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn or_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.xor_expr()?;
         while self.eat_kw("OR") {
+            self.enter()?;
             e = Expr::Or(Box::new(e), Box::new(self.xor_expr()?));
         }
         Ok(e)
     }
 
     fn xor_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.xor_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn xor_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.and_expr()?;
         while self.eat_kw("XOR") {
+            self.enter()?;
             e = Expr::Xor(Box::new(e), Box::new(self.and_expr()?));
         }
         Ok(e)
     }
 
     fn and_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.and_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn and_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.not_expr()?;
         while self.eat_kw("AND") {
+            self.enter()?;
             e = Expr::And(Box::new(e), Box::new(self.not_expr()?));
         }
         Ok(e)
@@ -762,6 +788,13 @@ impl<'s> Parser<'s> {
     }
 
     fn cmp_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.cmp_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn cmp_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.add_expr()?;
         loop {
             let op = match self.peek() {
@@ -776,25 +809,31 @@ impl<'s> Parser<'s> {
             };
             if let Some(op) = op {
                 self.bump();
+                self.enter()?;
                 e = Expr::Cmp(Box::new(e), op, Box::new(self.add_expr()?));
                 continue;
             }
             if self.is_kw("STARTS") && self.is_kw_at(1, "WITH") {
                 self.bump();
                 self.bump();
+                self.enter()?;
                 e = Expr::Cmp(Box::new(e), CmpOp::StartsWith, Box::new(self.add_expr()?));
             } else if self.is_kw("ENDS") && self.is_kw_at(1, "WITH") {
                 self.bump();
                 self.bump();
+                self.enter()?;
                 e = Expr::Cmp(Box::new(e), CmpOp::EndsWith, Box::new(self.add_expr()?));
             } else if self.eat_kw("CONTAINS") {
+                self.enter()?;
                 e = Expr::Cmp(Box::new(e), CmpOp::Contains, Box::new(self.add_expr()?));
             } else if self.eat_kw("IN") {
+                self.enter()?;
                 e = Expr::Cmp(Box::new(e), CmpOp::In, Box::new(self.add_expr()?));
             } else if self.is_kw("IS") {
                 self.bump();
                 let not = self.eat_kw("NOT");
                 self.expect_kw("NULL")?;
+                self.enter()?;
                 e = Expr::IsNull(Box::new(e), !not);
             } else {
                 return Ok(e);
@@ -803,6 +842,13 @@ impl<'s> Parser<'s> {
     }
 
     fn add_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.add_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn add_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.mul_expr()?;
         loop {
             let op = match self.peek() {
@@ -811,11 +857,19 @@ impl<'s> Parser<'s> {
                 _ => return Ok(e),
             };
             self.bump();
+            self.enter()?;
             e = Expr::Arith(Box::new(e), op, Box::new(self.mul_expr()?));
         }
     }
 
     fn mul_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.mul_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn mul_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.pow_expr()?;
         loop {
             let op = match self.peek() {
@@ -825,14 +879,23 @@ impl<'s> Parser<'s> {
                 _ => return Ok(e),
             };
             self.bump();
+            self.enter()?;
             e = Expr::Arith(Box::new(e), op, Box::new(self.pow_expr()?));
         }
     }
 
     fn pow_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.pow_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn pow_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.unary_expr()?;
         while self.peek() == &Tok::Caret {
             self.bump();
+            self.enter()?;
             e = Expr::Arith(Box::new(e), ArOp::Pow, Box::new(self.unary_expr()?));
         }
         Ok(e)
@@ -853,19 +916,30 @@ impl<'s> Parser<'s> {
             }
             Tok::Plus => {
                 self.bump();
-                self.unary_expr()
+                self.enter()?;
+                let e = self.unary_expr();
+                self.leave();
+                e
             }
             _ => self.postfix_expr(),
         }
     }
 
     fn postfix_expr(&mut self) -> Result<Expr, QueryError> {
+        let d = self.depth;
+        let r = self.postfix_expr_chain();
+        self.depth = d;
+        r
+    }
+
+    fn postfix_expr_chain(&mut self) -> Result<Expr, QueryError> {
         let mut e = self.atom()?;
         loop {
             match self.peek() {
                 Tok::Dot => {
                     self.bump();
                     let key = self.ident("property name")?;
+                    self.enter()?;
                     e = Expr::Prop(Box::new(e), key);
                 }
                 Tok::LBracket => {
@@ -874,6 +948,7 @@ impl<'s> Parser<'s> {
                         self.bump();
                         let hi = if self.peek() == &Tok::RBracket { None } else { Some(Box::new(self.expr()?)) };
                         self.expect(Tok::RBracket, "']'")?;
+                        self.enter()?;
                         e = Expr::Slice(Box::new(e), None, hi);
                         continue;
                     }
@@ -882,14 +957,17 @@ impl<'s> Parser<'s> {
                         self.bump();
                         let hi = if self.peek() == &Tok::RBracket { None } else { Some(Box::new(self.expr()?)) };
                         self.expect(Tok::RBracket, "']'")?;
+                        self.enter()?;
                         e = Expr::Slice(Box::new(e), Some(Box::new(i)), hi);
                     } else {
                         self.expect(Tok::RBracket, "']'")?;
+                        self.enter()?;
                         e = Expr::Index(Box::new(e), Box::new(i));
                     }
                 }
                 Tok::Colon if matches!(e, Expr::Var(..)) => {
                     let labels = self.labels()?;
+                    self.enter()?;
                     e = Expr::HasLabel(Box::new(e), labels);
                 }
                 _ => return Ok(e),

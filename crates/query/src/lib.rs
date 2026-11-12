@@ -52,7 +52,16 @@ pub struct Cancel {
     flag: Arc<AtomicBool>,
     timed_out: Arc<AtomicBool>,
     deadline: Option<Instant>,
+    /// Remaining memory budget for values a query builds itself (lists,
+    /// strings); see [`Cancel::charge`].
+    budget: Arc<std::sync::atomic::AtomicI64>,
+    over_budget: Arc<AtomicBool>,
 }
+
+/// Values (list elements, or 32 bytes of string) one query may build with
+/// `range`, list comprehensions, concatenation, `split` and `replace`:
+/// about 1 GiB. Graph data a query returns is not counted.
+pub const QUERY_VALUE_BUDGET: i64 = 32 << 20;
 
 impl Cancel {
     pub fn new(timeout: Option<Duration>) -> Self {
@@ -60,7 +69,21 @@ impl Cancel {
             flag: Arc::new(AtomicBool::new(false)),
             timed_out: Arc::new(AtomicBool::new(false)),
             deadline: timeout.map(|t| Instant::now() + t),
+            budget: Arc::new(std::sync::atomic::AtomicI64::new(QUERY_VALUE_BUDGET)),
+            over_budget: Arc::new(AtomicBool::new(false)),
         }
+    }
+    /// Account for `units` built values; false (and the query is stopped)
+    /// once the budget is spent.
+    #[inline]
+    pub(crate) fn charge(&self, units: usize) -> bool {
+        let left = self.budget.fetch_sub(units.min(i64::MAX as usize) as i64, Ordering::Relaxed);
+        if left < units as i64 {
+            self.over_budget.store(true, Ordering::Relaxed);
+            self.flag.store(true, Ordering::Relaxed);
+            return false;
+        }
+        true
     }
     pub fn never() -> Self {
         Self::new(None)
@@ -96,6 +119,13 @@ impl Cancel {
     fn error(&self) -> Option<QueryError> {
         if !self.flag.load(Ordering::Relaxed) && !self.deadline.is_some_and(|d| Instant::now() >= d) {
             return None;
+        }
+        if self.over_budget.load(Ordering::Relaxed) {
+            return Some(QueryError {
+                message: "query builds too much data (lists or strings over the memory budget)".into(),
+                position: None,
+                code: "too_large",
+            });
         }
         Some(if self.timed_out.load(Ordering::Relaxed) || self.deadline.is_some_and(|d| Instant::now() >= d) {
             QueryError { message: "query timed out".into(), position: None, code: "timeout" }

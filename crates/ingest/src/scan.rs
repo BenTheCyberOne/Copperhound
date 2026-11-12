@@ -169,6 +169,11 @@ fn skip_value(b: &[u8], i: usize) -> Result<usize> {
             while j < b.len() && !matches!(b[j], b',' | b'}' | b']') && !is_ws(b[j]) {
                 j += 1;
             }
+            // A value is never empty: a stray `}` / `]` / `,` here would make
+            // the record scanner loop without advancing.
+            if j == i {
+                bail!("unexpected '{}' at byte {i}", b.get(i).map_or('?', |&c| c as char));
+            }
             Ok(j)
         }
     }
@@ -367,6 +372,16 @@ mod tests {
                 .collect(),
             s,
         )
+    }
+
+    /// Stray closing brackets are errors, not an endless loop.
+    #[test]
+    fn stray_closers_fail() {
+        for src in ["[}]", "[ } ]", "[1,}]", r#"{"data":[{"a":1},}]}"#, "[1 }]"] {
+            let t = std::time::Instant::now();
+            assert!(scan_records(src.as_bytes()).is_err(), "{src}");
+            assert!(t.elapsed().as_secs() < 1, "{src}");
+        }
     }
 
     #[test]

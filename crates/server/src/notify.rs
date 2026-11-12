@@ -223,6 +223,12 @@ pub struct ChannelIn {
     pub email_to: Option<Vec<String>>,
 }
 
+/// A failed request, without the URL: webhook URLs are secrets, and these
+/// messages are stored in delivery and alert history that analysts read.
+pub fn request_error(e: reqwest::Error) -> String {
+    format!("request failed: {}", e.without_url())
+}
+
 pub fn validate_http_url(url: &str) -> Result<(), String> {
     let u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
     if u.scheme() != "http" && u.scheme() != "https" {
@@ -471,7 +477,7 @@ async fn post_json(url: &str, body: &Value, extra: &[(&str, String)]) -> Result<
     for (k, v) in extra {
         req = req.header(*k, v);
     }
-    let resp = req.body(bytes).send().await.map_err(|e| SendError { retry: true, msg: format!("request failed: {e}") })?;
+    let resp = req.body(bytes).send().await.map_err(|e| SendError { retry: true, msg: request_error(e) })?;
     let status = resp.status();
     if status.is_success() {
         return Ok(());
@@ -679,6 +685,15 @@ pub async fn test_channel(State(st): St, Path(id): Path<String>) -> Result<Json<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Delivery errors are stored where analysts read them: no webhook URL.
+    #[tokio::test]
+    async fn request_errors_hide_the_url() {
+        let e = reqwest::Client::new().post("http://127.0.0.1:1/services/T000/B000/SECRETTOKEN").send().await.unwrap_err();
+        assert!(format!("{e}").contains("SECRETTOKEN"), "reqwest includes the URL by default");
+        let msg = request_error(e);
+        assert!(!msg.contains("SECRETTOKEN") && !msg.contains("/services/"), "{msg}");
+    }
 
     fn input(v: Value) -> ChannelIn {
         serde_json::from_value(v).unwrap()

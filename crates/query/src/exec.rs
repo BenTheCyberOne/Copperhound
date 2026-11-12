@@ -86,6 +86,11 @@ impl Ctx<'_> {
 
 // ---------------------------------------------------------------- plan
 
+/// `{key: value}` in a pattern: equality, never true for null (as `=`).
+fn prop_eq(a: &Val, b: &Val) -> bool {
+    !a.is_null() && !b.is_null() && val_eq(a, b)
+}
+
 pub(crate) struct NodeFilter {
     /// Allowed node kinds as a bitmask (labels folded in).
     kind_mask: u64,
@@ -172,7 +177,7 @@ impl NodeFilter {
         if !self.flag_labels.is_empty() && !label_ok(g, id, &self.flag_labels) {
             return false;
         }
-        if !self.eqs.iter().zip(&self.eq_pushed).all(|((k, v), p)| (skip_pushed && *p) || val_eq(&node_prop(g, id, k), v)) {
+        if !self.eqs.iter().zip(&self.eq_pushed).all(|((k, v), p)| (skip_pushed && *p) || prop_eq(&node_prop(g, id, k), v)) {
             return false;
         }
         if self.exprs.is_empty() || (skip_pushed && self.expr_pushed.iter().all(|p| *p)) {
@@ -195,7 +200,7 @@ impl NodeFilter {
                 return false;
             }
         }
-        if !self.eqs.iter().zip(&self.eq_pushed).all(|((k, v), p)| !*p || val_eq(&node_prop(g, id, k), v)) {
+        if !self.eqs.iter().zip(&self.eq_pushed).all(|((k, v), p)| !*p || prop_eq(&node_prop(g, id, k), v)) {
             return false;
         }
         let row = [Val::Node(id)];
@@ -763,21 +768,99 @@ fn neighbors(g: &Graph, x: u32, dir: Dir, allow: &EdgeFilter, f: &mut impl FnMut
     true
 }
 
-/// Variable-length expansion (BFS, reachability semantics). `f(v, edges)`
-/// returns false to stop the expansion.
+/// Variable-length expansion: every node reachable from `u` by a walk of
+/// `min..=max` relationships, each emitted once (with one such walk when
+/// `need_edges`). The first `min` steps are expanded layer by layer (a node
+/// may sit in several layers), the rest as a BFS from layer `min`: any walk
+/// of length in `min..=max` passes through layer `min`, so this is exact
+/// without enumerating walks. A walk never steps straight back over the
+/// relationship it arrived by (Cypher never reuses a relationship), and the
+/// start node itself is not returned unless `min` is 0. `f(v, edges)`
+/// returns false to stop.
 #[allow(clippy::too_many_arguments)]
 fn expand_var(cx: &Ctx, u: u32, r: &RelPlan, dir: Dir, need_edges: bool, f: &mut dyn FnMut(u32, Vec<E>) -> bool) {
     let (min, max) = r.var_len.unwrap_or((1, None));
     let max = max.unwrap_or(u32::MAX);
-    let g = cx.g;
-    let mut parent: AHashMap<u32, E> = AHashMap::new();
-    let mut seen: AHashSet<u32> = AHashSet::new();
-    seen.insert(u);
-    if min == 0 && !f(u, Vec::new()) {
+    if min > max {
         return;
     }
-    let mut frontier = vec![u];
-    let mut depth = 0u32;
+    let g = cx.g;
+    // Phase 1: exact layers 1..=min, with a parent per (layer, node). `via`
+    // is the one relationship a node was reached by (None once two distinct
+    // ones reach it: then any relationship may continue some walk).
+    let mut layer_parents: Vec<AHashMap<u32, E>> = Vec::new();
+    let mut layer = vec![u];
+    let mut via: AHashMap<u32, Option<E>> = AHashMap::new();
+    for _ in 0..min {
+        if cx.hit() {
+            return;
+        }
+        let mut parents: AHashMap<u32, E> = AHashMap::new();
+        let mut next_via: AHashMap<u32, Option<E>> = AHashMap::new();
+        let mut next = Vec::new();
+        for &x in &layer {
+            let back = via.get(&x).copied().flatten();
+            neighbors(g, x, dir, &r.allow, &mut |y, e| {
+                if Some(e) == back {
+                    return true;
+                }
+                match next_via.entry(y) {
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        v.insert(Some(e));
+                        parents.insert(y, e);
+                        next.push(y);
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut o) => {
+                        if *o.get() != Some(e) {
+                            *o.get_mut() = None;
+                        }
+                    }
+                }
+                true
+            });
+        }
+        via = next_via;
+        if need_edges {
+            layer_parents.push(parents);
+        }
+        layer = next;
+        if layer.is_empty() {
+            return;
+        }
+    }
+    // Phase 2: BFS from layer `min` for up to `max - min` more steps.
+    let mut parent: AHashMap<u32, E> = AHashMap::new();
+    let mut seen: AHashSet<u32> = layer.iter().copied().collect();
+    if min > 0 {
+        seen.insert(u);
+    }
+    let walk = |y: u32, parent: &AHashMap<u32, E>| -> Vec<E> {
+        if !need_edges {
+            return Vec::new();
+        }
+        let mut es = Vec::new();
+        let mut c = y;
+        // Back to layer `min` through the BFS parents ...
+        while let Some(&e) = parent.get(&c) {
+            es.push(e);
+            c = if e.1 == c { e.0 } else { e.1 };
+        }
+        // ... then down the layers to `u`.
+        for lp in layer_parents.iter().rev() {
+            let e = lp[&c];
+            es.push(e);
+            c = if e.1 == c { e.0 } else { e.1 };
+        }
+        es.reverse();
+        es
+    };
+    for &y in &layer {
+        if (min == 0 || y != u) && !f(y, walk(y, &parent)) {
+            return;
+        }
+    }
+    let mut frontier = layer;
+    let mut depth = min;
     while !frontier.is_empty() && depth < max {
         if cx.hit() {
             return;
@@ -795,24 +878,9 @@ fn expand_var(cx: &Ctx, u: u32, r: &RelPlan, dir: Dir, need_edges: bool, f: &mut
                 true
             });
         }
-        if depth >= min {
-            for &y in &next {
-                let edges = if need_edges {
-                    let mut es = Vec::new();
-                    let mut c = y;
-                    while c != u {
-                        let e = parent[&c];
-                        es.push(e);
-                        c = if e.1 == c { e.0 } else { e.1 };
-                    }
-                    es.reverse();
-                    es
-                } else {
-                    Vec::new()
-                };
-                if !f(y, edges) {
-                    return;
-                }
+        for &y in &next {
+            if !f(y, walk(y, &parent)) {
+                return;
             }
         }
         frontier = next;
@@ -1263,35 +1331,42 @@ fn reverse_bfs(cx: &Ctx, targets: &[u32], allow: &EdgeFilter, dir: Dir, max: Opt
     (next, kind, dist)
 }
 
-/// One shortest path per start node in `a` to the nearest node of `b`.
+/// Shortest path from `s` to the nearest of `targets` (which exclude `s`).
+fn shortest_from(cx: &Ctx, r: &RelPlan, s: u32, targets: &[u32]) -> Option<(Vec<u32>, Vec<E>)> {
+    let (_, max) = r.var_len.unwrap_or((1, None));
+    let g = cx.g;
+    match (r.dir, max) {
+        (Dir::Out, None) => shortest_path(g, &[s], targets, &r.allow).map(|res| {
+            let edges: Vec<E> = res.nodes.windows(2).zip(&res.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
+            (res.nodes, edges)
+        }),
+        (Dir::In, None) => shortest_path(g, targets, &[s], &r.allow).map(|res| {
+            let mut edges: Vec<E> = res.nodes.windows(2).zip(&res.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
+            let mut nodes = res.nodes;
+            nodes.reverse();
+            edges.reverse();
+            (nodes, edges)
+        }),
+        _ => bidi(cx, &[s], targets, &r.allow, r.dir, max),
+    }
+}
+
+/// One shortest path per start node in `a` to the nearest node of `b`. A
+/// start that is itself in `b` gets a path to another node of `b`.
 fn shortest_paths(cx: &Ctx, r: &RelPlan, a: &[u32], b: &[u32], f: &mut dyn FnMut(Vec<u32>, Vec<E>) -> bool) {
     let (min, max) = r.var_len.unwrap_or((1, None));
-    let g = cx.g;
+    let bset: AHashSet<u32> = b.iter().copied().collect();
+    let without = |s: u32| -> Vec<u32> { b.iter().copied().filter(|&t| t != s).collect() };
     if a.len() <= 64 {
-        let bset: AHashSet<u32> = b.iter().copied().collect();
         for &s in a {
             if cx.hit() {
                 return;
             }
-            let targets: Vec<u32> = if bset.contains(&s) { b.iter().copied().filter(|&t| t != s).collect() } else { b.to_vec() };
+            let targets: Vec<u32> = if bset.contains(&s) { without(s) } else { b.to_vec() };
             if targets.is_empty() {
                 continue;
             }
-            let res = match (r.dir, max) {
-                (Dir::Out, None) => shortest_path(g, &[s], &targets, &r.allow).map(|res| {
-                    let edges: Vec<E> = res.nodes.windows(2).zip(&res.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
-                    (res.nodes, edges)
-                }),
-                (Dir::In, None) => shortest_path(g, &targets, &[s], &r.allow).map(|res| {
-                    let mut edges: Vec<E> = res.nodes.windows(2).zip(&res.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
-                    let mut nodes = res.nodes;
-                    nodes.reverse();
-                    edges.reverse();
-                    (nodes, edges)
-                }),
-                _ => bidi(cx, &[s], &targets, &r.allow, r.dir, max),
-            };
-            if let Some((nodes, edges)) = res {
+            if let Some((nodes, edges)) = shortest_from(cx, r, s, &targets) {
                 if (edges.len() as u32) < min {
                     continue;
                 }
@@ -1308,7 +1383,17 @@ fn shortest_paths(cx: &Ctx, r: &RelPlan, a: &[u32], b: &[u32], f: &mut dyn FnMut
             return;
         }
         let d = dist[s as usize];
-        if d == u32::MAX || d == 0 || d < min {
+        if d == 0 {
+            // A start inside `b`: search the other targets, as above.
+            let targets = without(s);
+            if let Some((nodes, edges)) = (!targets.is_empty()).then(|| shortest_from(cx, r, s, &targets)).flatten() {
+                if (edges.len() as u32) >= min && !f(nodes, edges) {
+                    return;
+                }
+            }
+            continue;
+        }
+        if d == u32::MAX || d < min {
             continue;
         }
         let mut nodes = vec![s];
@@ -1327,8 +1412,41 @@ fn shortest_paths(cx: &Ctx, r: &RelPlan, a: &[u32], b: &[u32], f: &mut dyn FnMut
     }
 }
 
-/// Union of all shortest paths from each node of `a` to its nearest node of `b`.
+/// Union of all shortest paths from each node of `a` to its nearest node of
+/// `b`; a start that is itself in `b` is measured against the other nodes of
+/// `b` (at most 64 such starts, beyond that the result is marked truncated).
 fn all_shortest(cx: &Ctx, r: &RelPlan, a: &[u32], b: &[u32]) -> Option<PathVal> {
+    let bset: AHashSet<u32> = b.iter().copied().collect();
+    let (inside, outside): (Vec<u32>, Vec<u32>) = a.iter().copied().partition(|s| bset.contains(s));
+    let mut acc = if outside.is_empty() { None } else { all_shortest_set(cx, r, &outside, b) };
+    if inside.len() > 64 {
+        cx.truncated.store(true, Ordering::Relaxed);
+    }
+    for &s in inside.iter().take(64) {
+        if cx.hit() {
+            break;
+        }
+        let others: Vec<u32> = b.iter().copied().filter(|&t| t != s).collect();
+        if others.is_empty() {
+            continue;
+        }
+        if let Some(p) = all_shortest_set(cx, r, &[s], &others) {
+            acc = Some(match acc {
+                None => p,
+                Some(mut q) => {
+                    let (mut ns, mut es): (AHashSet<u32>, AHashSet<E>) = (q.nodes.iter().copied().collect(), q.edges.iter().copied().collect());
+                    q.nodes.extend(p.nodes.into_iter().filter(|n| ns.insert(*n)));
+                    q.edges.extend(p.edges.into_iter().filter(|e| es.insert(*e)));
+                    q
+                }
+            });
+        }
+    }
+    acc
+}
+
+/// [`all_shortest`] for starts outside `b`.
+fn all_shortest_set(cx: &Ctx, r: &RelPlan, a: &[u32], b: &[u32]) -> Option<PathVal> {
     let (_, max) = r.var_len.unwrap_or((1, None));
     let (_, _, dist) = reverse_bfs(cx, b, &r.allow, r.dir, max, Some(a), false);
     let mut seen: AHashSet<u32> = AHashSet::new();

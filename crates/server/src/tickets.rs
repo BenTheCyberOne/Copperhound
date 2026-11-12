@@ -376,7 +376,7 @@ async fn post(t: &Target, url: &str, body: &Value, event: &str) -> Result<Value,
             req = req.header("x-copperhound-signature", signature(&t.token, &bytes));
         }
     }
-    check(req.body(bytes).send().await.map_err(|e| format!("request failed: {e}"))?).await
+    check(req.body(bytes).send().await.map_err(crate::notify::request_error)?).await
 }
 
 /// Create one ticket for `items`.
@@ -470,7 +470,7 @@ pub async fn test_target(State(st): St, Path(id): Path<String>) -> Result<Json<V
                 if let Some(a) = auth_header(&t) {
                     req = req.header("authorization", a);
                 }
-                let v = check(req.send().await.map_err(|e| format!("request failed: {e}"))?).await?;
+                let v = check(req.send().await.map_err(crate::notify::request_error)?).await?;
                 Ok(v["displayName"].as_str().map(|n| format!("signed in as {n}")).unwrap_or_else(|| "connected".into()))
             }
             TargetKind::Webhook => {

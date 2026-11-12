@@ -203,6 +203,50 @@ pub fn bh_signature(key: &[u8], method: &str, uri: &str, request_date: &str, bod
     STANDARD.encode(step(&k2, body))
 }
 
+/// Largest body a `bhesignature` request may send: it is read before the
+/// signature can be checked. `COPPERHOUND_MAX_SIGNED_BODY_MB`, default 4096.
+fn max_signed_body() -> u64 {
+    static V: OnceLock<u64> = OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("COPPERHOUND_MAX_SIGNED_BODY_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|&v| v > 0).unwrap_or(4096) << 20
+    })
+}
+
+/// Delete spool files left behind by a crash.
+pub fn remove_stale_spools(data_dir: &std::path::Path) {
+    if let Ok(rd) = std::fs::read_dir(data_dir) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(".bhsig-") && n.ends_with(".part") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// A spooled request body: deleted when dropped, whether the request was
+/// rejected half-way or the handler consumed it.
+struct Spool {
+    file: Option<tokio::fs::File>,
+    path: std::path::PathBuf,
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+impl tokio::io::AsyncRead for Spool {
+    fn poll_read(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+        match self.file.as_mut() {
+            Some(f) => std::pin::Pin::new(f).poll_read(cx, buf),
+            None => std::task::Poll::Ready(Ok(())),
+        }
+    }
+}
+
 /// Verify a `bhesignature` request. The body is read (spooled to disk when
 /// large) to check the signature and handed on unchanged.
 pub async fn verify_bh_signature(st: &crate::state::AppState, req: Request) -> Result<(Principal, Request), ApiError> {
@@ -239,42 +283,55 @@ pub async fn verify_bh_signature(st: &crate::state::AppState, req: Request) -> R
     let k2 = step(&k1, date.get(..13).unwrap_or(&date).as_bytes());
     let mut mac = <Hmac<Sha256>>::new_from_slice(&k2).expect("any key length");
     let (parts, body) = req.into_parts();
-    let spool = st.data_dir.join(format!(".bhsig-{}.part", crate::auth::random_hex(8)));
+    let spool_path = st.data_dir.join(format!(".bhsig-{}.part", crate::auth::random_hex(8)));
     let mut buf: Vec<u8> = Vec::new();
-    let mut file: Option<tokio::fs::File> = None;
+    // Deleted on every early return below (and after the handler read it).
+    let mut spool: Option<Spool> = None;
+    let mut total = 0u64;
+    let max = max_signed_body();
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| ApiError::bad(e.to_string()))?;
+        total += chunk.len() as u64;
+        if total > max {
+            return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, format!("signed request body over {} MiB", max >> 20)));
+        }
         mac.update(&chunk);
-        if file.is_none() && buf.len() + chunk.len() > (8 << 20) {
-            let mut f = tokio::fs::File::create(&spool).await.map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
+        if spool.is_none() && buf.len() + chunk.len() > (8 << 20) {
+            // Read back after the signature check: open for reading too.
+            let f = tokio::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&spool_path)
+                .await
+                .map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
+            let s = spool.insert(Spool { file: Some(f), path: spool_path.clone() });
+            let f = s.file.as_mut().expect("just opened");
             f.write_all(&buf).await.map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
             buf.clear();
-            file = Some(f);
         }
-        match file.as_mut() {
+        match spool.as_mut().and_then(|s| s.file.as_mut()) {
             Some(f) => f.write_all(&chunk).await.map_err(|e| ApiError::from(anyhow::anyhow!(e)))?,
             None => buf.extend_from_slice(&chunk),
         }
     }
     let given = STANDARD.decode(&sig).map_err(|_| unauthorized("Signature is not base64"))?;
     if mac.verify_slice(&given).is_err() {
-        drop(file);
-        let _ = tokio::fs::remove_file(&spool).await;
         return Err(unauthorized("bad signature"));
     }
     // No replay cache: the scheme signs only the hour of RequestDate, so
     // identical requests (e.g. polling) legitimately repeat a signature
     // within the hour, as BloodHound accepts. CH-HMAC is the replay-proof
     // alternative (hmac_auth.rs).
-    let body = match file {
+    let body = match spool {
         None => Body::from(buf),
-        Some(mut f) => {
+        Some(mut s) => {
+            let f = s.file.as_mut().expect("open");
             f.flush().await.map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
             f.seek(std::io::SeekFrom::Start(0)).await.map_err(|e| ApiError::from(anyhow::anyhow!(e)))?;
-            // Unlink now (Unix keeps the open file); Windows cleans up at the next start.
-            let _ = std::fs::remove_file(&spool);
-            Body::from_stream(tokio_util::io::ReaderStream::new(f))
+            // The spool deletes itself once the body stream is dropped.
+            Body::from_stream(tokio_util::io::ReaderStream::new(s))
         }
     };
     let who = st.auth.token_principal_by_id(&token_id).ok_or_else(|| unauthorized("unknown, expired or disabled token"))?;

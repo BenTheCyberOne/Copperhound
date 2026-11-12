@@ -250,6 +250,7 @@ impl AppState {
         }
         // A restore staged by POST /restore applies before anything is loaded.
         crate::backup::apply_pending(&data_dir).context("applying the staged restore")?;
+        crate::compat::remove_stale_spools(&data_dir);
         if let Ok(rd) = std::fs::read_dir(&data_dir) {
             for e in rd.flatten() {
                 let n = e.file_name().to_string_lossy().into_owned();

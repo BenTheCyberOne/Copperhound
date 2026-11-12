@@ -1065,6 +1065,18 @@ async fn bloodhound_compatible_upload_api() {
     // Wrong key.
     let (s, _) = call(&app, signed("POST", &format!("/api/v2/file-upload/{job}"), file.clone(), "application/json", "nope")).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // Bodies over 8 MiB are spooled to disk while the signature is checked;
+    // the spool is gone afterwards whether the signature was good or not.
+    let spools = || std::fs::read_dir(&data).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".bhsig-")).count();
+    let mut big = br#"{"data":["#.to_vec();
+    big.resize(9 << 20, b' ');
+    big.extend_from_slice(br#"],"meta":{"type":"users","count":0,"version":6}}"#);
+    let (s, _) = call(&app, signed("POST", &format!("/api/v2/file-upload/{job}"), big.clone(), "application/json", "nope")).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert_eq!(spools(), 0, "spool left after a rejected signature");
+    let (s, v) = call(&app, signed("POST", &format!("/api/v2/file-upload/{job}"), big, "application/json", &key)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(spools(), 0, "spool left after the upload");
     // Bearer API token works too.
     let req = Request::builder()
         .method("POST")

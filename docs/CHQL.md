@@ -143,8 +143,10 @@ Relationship type rules:
   `CONTAINS`, `IN`, `=~`) are **case-insensitive**. `list = value` is true when
   the list contains the value (collector properties are often lists).
 * **Null handling**: `WHERE` uses two-valued logic — a `null` condition is false
-  and `NOT null` is true (Cypher's three-valued logic would drop the row). Use
-  `IS NULL` / `IS NOT NULL` / `coalesce()` to be explicit.
+  and `NOT null` is true (Cypher's three-valued logic would drop the row). A
+  comparison with `null` is never true: `x = null`, `x <> null` and
+  `{key: null}` in a pattern match nothing, and two missing properties are not
+  equal. Use `IS NULL` / `IS NOT NULL` / `coalesce()` to test for null.
 * **Arithmetic** is floating point: `count(x) / 2` is `2.5`, not `2`; use
   `toInteger()` / `floor()` to truncate. Integral results render as integers.
 * `=~` matches the whole string (Cypher semantics), case-insensitively; patterns

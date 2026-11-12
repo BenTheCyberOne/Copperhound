@@ -209,7 +209,8 @@ fn str_op(a: &Val, needle: &Val, f: fn(&str, &str) -> bool) -> bool {
 pub fn compare(a: &Val, op: CmpOp, b: &Val) -> bool {
     use Ordering::*;
     match op {
-        CmpOp::Eq => val_eq(a, b),
+        // `x = null` is never true (Cypher: null); `IS NULL` tests for null.
+        CmpOp::Eq => !a.is_null() && !b.is_null() && val_eq(a, b),
         CmpOp::Ne => !a.is_null() && !b.is_null() && !val_eq(a, b),
         CmpOp::Lt => val_ord(a, b) == Some(Less),
         CmpOp::Le => matches!(val_ord(a, b), Some(Less | Equal)),

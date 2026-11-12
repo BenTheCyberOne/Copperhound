@@ -356,7 +356,8 @@ impl Test {
                 V::List(l) => !l.is_empty(),
             },
             Test::Cmp(op, lit) => match op {
-                Op::Eq => val_eq(a, lit),
+                // `x = null` never matches (CHQL), like `<>` below.
+                Op::Eq => !matches!(a, V::Null) && !matches!(lit.v, Val::Null) && val_eq(a, lit),
                 // `x <> null` never matches (CHQL), whatever `x` is.
                 Op::Ne => !matches!(a, V::Null) && !matches!(lit.v, Val::Null) && !val_eq(a, lit),
                 Op::Lt => val_ord(a, lit) == Some(Ordering::Less),
@@ -488,6 +489,18 @@ impl Graph {
         let mut r = RoaringBitmap::new();
         for (raw, bm) in self.kind_bitmaps().iter().enumerate() {
             if !bm.is_empty() && pred(NodeKind::from_u8(raw as u8)) {
+                r |= bm;
+            }
+        }
+        r
+    }
+
+    /// Nodes whose kind name (custom OpenGraph kinds by their own name, as
+    /// `n.kind` reads them) satisfies `pred`.
+    fn kind_names_where(&self, pred: impl Fn(&str) -> bool) -> RoaringBitmap {
+        let mut r = RoaringBitmap::new();
+        for (raw, bm) in self.kind_bitmaps().iter().enumerate() {
+            if !bm.is_empty() && pred(self.raw_kind_name(raw as u8)) {
                 r |= bm;
             }
         }
@@ -800,7 +813,7 @@ impl<'g> Eval<'g> {
                 }
                 _ => self.scan(within, |id| t.on(V::Str(g.oid(id)))),
             },
-            "kind" | "label" => Self::restrict(g.kinds_where(|k| t.on(V::Str(k.as_str()))), within),
+            "kind" | "label" => Self::restrict(g.kind_names_where(|k| t.on(V::Str(k))), within),
             "id" => self.scan(within, |id| t.on(V::Num(id as f64))),
             _ => match flag_key(&k) {
                 Some(f) => self.flag_leaf(&k, f, t, within),

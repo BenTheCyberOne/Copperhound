@@ -81,13 +81,18 @@ impl Default for Interner {
 /// Edge kind registry: built-ins resolve lock-free, unknown collector right
 /// names are registered on first sight.
 pub struct DynKinds {
-    extra: Mutex<Vec<String>>,
+    /// Names in registration order, and their index.
+    extra: Mutex<(Vec<String>, AHashMap<String, u16>)>,
 }
+
+/// Returned by [`DynKinds::get`] when the registry is full; edges of this
+/// kind are dropped by the emitter (never turned into another kind).
+pub const KIND_DROPPED: u16 = u16::MAX;
 
 impl DynKinds {
     pub fn new() -> Self {
         Self {
-            extra: Mutex::new(Vec::new()),
+            extra: Mutex::new((Vec::new(), AHashMap::new())),
         }
     }
 
@@ -96,16 +101,19 @@ impl DynKinds {
         if let Some(k) = builtin_edge_kind(name) {
             return k;
         }
-        let mut extra = self.extra.lock();
+        let mut guard = self.extra.lock();
+        let (extra, index) = &mut *guard;
+        if let Some(&k) = index.get(name) {
+            return k;
+        }
         let base = BUILTIN_EDGE_KINDS.len();
-        if let Some(p) = extra.iter().position(|e| e == name) {
-            return (base + p) as u16;
+        if base + extra.len() >= KIND_DROPPED as usize {
+            return KIND_DROPPED;
         }
-        if base + extra.len() >= u16::MAX as usize {
-            return ch_model::ek::GENERIC_ALL; // registry full; degrade rather than fail
-        }
+        let k = (base + extra.len()) as u16;
         extra.push(name.to_string());
-        (base + extra.len() - 1) as u16
+        index.insert(name.to_string(), k);
+        k
     }
 
     /// Kind name and traversability tables. Collector-specific kinds are
@@ -116,7 +124,7 @@ impl DynKinds {
     pub fn into_tables(self) -> (Vec<String>, Vec<bool>, Vec<u16>) {
         let (mut names, mut trav) = ch_model::builtin_kind_tables();
         let base = names.len();
-        let extra = self.extra.into_inner();
+        let extra = self.extra.into_inner().0;
         let mut order: Vec<usize> = (0..extra.len()).collect();
         order.sort_unstable_by(|&a, &b| extra[a].cmp(&extra[b]));
         let mut remap: Vec<u16> = (0..(base + extra.len()) as u16).collect();
@@ -486,7 +494,15 @@ impl<'a> Emitter<'a> {
 
     /// Edge with an end addressed by name.
     pub fn name_edge(&mut self, src: EndRef, dst: EndRef, kind: u16) {
+        if kind == KIND_DROPPED {
+            return self.kind_dropped();
+        }
         self.out.name_edges.push(NameEdge { src, dst, kind });
+    }
+
+    #[cold]
+    fn kind_dropped(&mut self) {
+        self.error(|| format!("more than {} distinct relationship kinds: further kinds are dropped", KIND_DROPPED - 1));
     }
 
     /// Reference to another object, with an optional kind hint.
@@ -525,6 +541,9 @@ impl<'a> Emitter<'a> {
 
     #[inline]
     pub fn edge(&mut self, src: u32, dst: u32, kind: u16) {
+        if kind == KIND_DROPPED {
+            return self.kind_dropped();
+        }
         if src != dst {
             let mut e = Edge::new(src, dst, kind);
             if let Some((owner, cat)) = self.section {
@@ -554,6 +573,9 @@ impl<'a> Emitter<'a> {
         fixed_is_src: bool,
         create: Option<NodeKind>,
     ) {
+        if kind == KIND_DROPPED {
+            return self.kind_dropped();
+        }
         let dn = normalize_dn(dn);
         if !dn.is_empty() {
             let pad = match self.section {

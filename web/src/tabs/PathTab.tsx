@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
 import type { GraphResult } from "../api/types";
 import { CategoryChecklist } from "../components/CategoryChecklist";
@@ -13,6 +13,15 @@ export function PathTab() {
   const [toTier0, setToTier0] = useState(false);
   const [allEdges, setAllEdges] = useState(false);
   const [allPaths, setAllPaths] = useState(false);
+  const [network, setNetwork] = useState(false);
+  const [hasConduits, setHasConduits] = useState(false);
+  useEffect(() => {
+    api.network().then(
+      (s) => setHasConduits(s.conduits !== null),
+      () => setHasConduits(false),
+    );
+  }, []);
+  const useNetwork = network && hasConduits;
   const [exclude, setExclude] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<GraphResult | null>(null);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
@@ -42,18 +51,25 @@ export function PathTab() {
           to_tier0: toTier0,
           exclude: [...exclude],
           all_edges: allEdges,
-          all: allPaths,
+          all: allPaths && !useNetwork,
+          ...(useNetwork ? { network: true } : {}),
         }),
       );
       const hops = hopsOf(res);
       if (hops.length === 0) {
         setResult(null);
-        setStatus({ text: "No path found.", error: false });
+        setStatus({ text: useNetwork ? "No path the network conduits allow." : "No path found.", error: false });
         return;
       }
       setResult(res);
       const many = res.all_paths;
-      const extra = many ? ` · all shortest paths: ${many.nodes} objects, ${many.edges} relationships${many.truncated ? " (capped)" : ""}` : "";
+      const zones = res.zones?.filter((z): z is string => z !== null) ?? [];
+      const route = zones.filter((z, i) => i === 0 || z !== zones[i - 1]);
+      const extra = many
+        ? ` · all shortest paths: ${many.nodes} objects, ${many.edges} relationships${many.truncated ? " (capped)" : ""}`
+        : res.network
+          ? ` · network-feasible${route.length > 0 ? `: ${route.join(" → ")}` : ""}`
+          : "";
       setStatus({ text: `${hops.length} hop${hops.length === 1 ? "" : "s"}${extra} · ${res.elapsed_ms.toFixed(1)} ms`, error: false });
       loadResult(res, { path: true });
     } catch (err) {
@@ -76,9 +92,15 @@ export function PathTab() {
       </label>
       {!toTier0 && <NodePicker label="Path end" value={pathTo} onSelect={setPathTo} onClear={() => setPathTo(null)} />}
       <label className="toggle" title="Draw every path of the shortest length, not just one">
-        <input type="checkbox" checked={allPaths} onChange={(e) => setAllPaths(e.target.checked)} />
+        <input type="checkbox" checked={allPaths && !useNetwork} disabled={useNetwork} onChange={(e) => setAllPaths(e.target.checked)} />
         All shortest paths
       </label>
+      {hasConduits && (
+        <label className="toggle" title="Follow only paths the network conduits allow (Admin → Server → Network conduits)">
+          <input type="checkbox" checked={network} onChange={(e) => setNetwork(e.target.checked)} />
+          Only paths the network allows
+        </label>
+      )}
 
       <details className="kind-filter">
         <summary>

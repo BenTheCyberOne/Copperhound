@@ -137,6 +137,9 @@ enum Cmd {
         /// Target the nearest Tier Zero object instead of --to.
         #[arg(long, conflicts_with = "to")]
         to_tier0: bool,
+        /// Network conduits (JSON, docs/OT.md): only paths the firewall rules allow.
+        #[arg(long)]
+        conduits: Option<PathBuf>,
         #[command(flatten)]
         filter: FilterArgs,
     },
@@ -147,6 +150,9 @@ enum Cmd {
         top: usize,
         #[arg(long)]
         json: bool,
+        /// Network conduits (JSON, docs/OT.md): also report network-feasible exposure.
+        #[arg(long)]
+        conduits: Option<PathBuf>,
         #[command(flatten)]
         filter: FilterArgs,
     },
@@ -443,14 +449,16 @@ fn main() -> Result<()> {
             from,
             to,
             to_tier0,
+            conduits,
             filter,
-        } => path(&graph, &from, to.as_deref(), to_tier0, &filter),
+        } => path(&graph, &from, to.as_deref(), to_tier0, conduits.as_deref(), &filter),
         Cmd::Tier0 {
             graph,
             top,
             json,
+            conduits,
             filter,
-        } => tier0(&graph, top, json, &filter),
+        } => tier0(&graph, top, json, conduits.as_deref(), &filter),
         Cmd::Reach {
             graph,
             from,
@@ -767,7 +775,17 @@ fn stats(graph: &Path) -> Result<()> {
     Ok(())
 }
 
-fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, fa: &FilterArgs) -> Result<()> {
+/// Load a conduits file and resolve it against the graph.
+fn net_model(g: &Graph, file: &Path) -> Result<ch_engine::net::NetModel> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let c: ch_analysis::network::Conduits = serde_json::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+    let (m, zones) = ch_analysis::network::build_model(g, &c).map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+    let summary: Vec<String> = zones.iter().map(|z| format!("{} ({})", z.name, num(z.hosts))).collect();
+    eprintln!("network zones: {}   attacker starts in {}", summary.join(", "), c.attacker_zone.trim());
+    Ok(m)
+}
+
+fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, conduits: Option<&Path>, fa: &FilterArgs) -> Result<()> {
     let g = open(graph)?;
     let f = filter(&g, fa)?;
     let src = resolve(&g, from)?;
@@ -780,9 +798,17 @@ fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, fa: &FilterA
     } else {
         vec![resolve(&g, to.expect("clap enforces --to or --to-tier0"))?]
     };
+    let net = conduits.map(|c| net_model(&g, c)).transpose()?;
     let t = Instant::now();
-    let res = shortest_path(&g, &[src], &targets, &f);
+    let res = match &net {
+        Some(m) => ch_engine::net::net_shortest_path(&g, &[src], &targets, &f, m),
+        None => shortest_path(&g, &[src], &targets, &f),
+    };
     let ms = t.elapsed().as_secs_f64() * 1e3;
+    let zone = |n: u32| match &net {
+        Some(m) if m.zone_of[n as usize] != ch_engine::net::NO_ZONE => format!("  [{}]", m.zones[m.zone_of[n as usize] as usize]),
+        _ => String::new(),
+    };
     match res {
         None => println!("no path ({ms:.2} ms)"),
         Some(p) => {
@@ -791,12 +817,13 @@ fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, fa: &FilterA
                 p.kinds.len(),
                 num(p.explored as u64)
             );
-            println!("  {}", label(&g, p.nodes[0]));
+            println!("  {}{}", label(&g, p.nodes[0]), zone(p.nodes[0]));
             for (i, k) in p.kinds.iter().enumerate() {
                 println!(
-                    "    -[{}]-> {}",
+                    "    -[{}]-> {}{}",
                     g.edge_kind_name(*k),
-                    label(&g, p.nodes[i + 1])
+                    label(&g, p.nodes[i + 1]),
+                    zone(p.nodes[i + 1])
                 );
             }
         }
@@ -804,11 +831,16 @@ fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, fa: &FilterA
     Ok(())
 }
 
-fn tier0(graph: &Path, top: usize, json: bool, fa: &FilterArgs) -> Result<()> {
+fn tier0(graph: &Path, top: usize, json: bool, conduits: Option<&Path>, fa: &FilterArgs) -> Result<()> {
     let g = open(graph)?;
     let f = filter(&g, fa)?;
+    let net = conduits.map(|c| net_model(&g, c)).transpose()?;
     let t = Instant::now();
     let r = tier0_analysis(&g, &f, top);
+    let net_exposed = net.as_ref().map(|m| {
+        let targets = g.nodes_with_flag(flags::TIER0);
+        ch_engine::net::net_exposure(&g, &targets, |s, d, k| f.permits(&g, s, d, k), m).exposed.len() as u64
+    });
     let secs = t.elapsed().as_secs_f64();
     if json {
         let choke: Vec<_> = r
@@ -825,7 +857,7 @@ fn tier0(graph: &Path, top: usize, json: bool, fa: &FilterArgs) -> Result<()> {
             .collect();
         let out = serde_json::json!({
             "tier0_nodes": r.tier0_nodes, "max_depth": r.max_depth,
-            "exposed_principals": r.exposed_principals, "exposure": r.exposure,
+            "exposed_principals": r.exposed_principals, "network_exposed_principals": net_exposed, "exposure": r.exposure,
             "choke_points": choke, "seconds": secs,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -836,6 +868,13 @@ fn tier0(graph: &Path, top: usize, json: bool, fa: &FilterArgs) -> Result<()> {
         num(r.tier0_nodes),
         r.max_depth
     );
+    if let Some(n) = net_exposed {
+        println!(
+            "Network-feasible: {} of {} exposed principals have a path the conduits allow",
+            num(n),
+            num(r.exposed_principals)
+        );
+    }
     println!("\nObjects with an attack path to Tier Zero:");
     for e in &r.exposure {
         let pct = 100.0 * e.with_path as f64 / e.total.max(1) as f64;

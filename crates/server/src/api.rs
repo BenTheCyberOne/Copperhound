@@ -206,6 +206,9 @@ pub fn required_role(method: &axum::http::Method, path: &str) -> Role {
     if (p == "/kind-styles" || p.ends_with("/custom-nodes")) && method != Method::GET {
         return Role::Admin;
     }
+    if p == "/network" && method != Method::GET {
+        return Role::Admin;
+    }
     if method == Method::DELETE && p.starts_with("/posture/") {
         return Role::Admin;
     }
@@ -668,6 +671,9 @@ pub struct PathReq {
     /// Return every shortest path (as one subgraph) instead of one.
     #[serde(default)]
     all: bool,
+    /// Only paths the network conduits allow (docs/OT.md); returns one path.
+    #[serde(default)]
+    network: bool,
 }
 
 /// Edges drawn at most for `all: true`.
@@ -688,6 +694,34 @@ pub async fn path(State(st): St, Json(r): Json<PathReq>) -> ApiResult {
             let to = r.to.as_ref().ok_or_else(|| ApiError::bad("'to' is required unless to_tier0 is set"))?;
             vec![resolve(g, to)?]
         };
+        if r.network {
+            let m = crate::network::model(&st2, g)?;
+            let mut v = match ch_engine::net::net_shortest_path(g, &[src], &targets, &f, &m) {
+                Some(p) => {
+                    let edges: Vec<_> = p.nodes.windows(2).zip(&p.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
+                    let mut v = graph_result(g, &p.nodes, &edges, std::slice::from_ref(&p.nodes), false, t);
+                    v["hops"] = Value::Array(edges.iter().map(|&e| edge_json(g, e)).collect());
+                    v["zones"] = Value::Array(
+                        p.nodes
+                            .iter()
+                            .map(|&n| match m.zone_of[n as usize] {
+                                ch_engine::net::NO_ZONE => Value::Null,
+                                z => json!(m.zones[z as usize]),
+                            })
+                            .collect(),
+                    );
+                    v
+                }
+                None => {
+                    let mut v = graph_result(g, &[], &[], &[], false, t);
+                    v["hops"] = json!([]);
+                    v
+                }
+            };
+            v["network"] = json!(true);
+            v["generation"] = json!(generation);
+            return Ok(Json(v));
+        }
         if r.all {
             let mut v = match ch_engine::all_shortest_paths(g, &[src], &targets, &f, ALL_PATHS_MAX_EDGES) {
                 Some(a) => {

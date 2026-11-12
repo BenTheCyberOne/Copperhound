@@ -79,8 +79,10 @@ Computed in the background after every ingest:
   members that belong and revoke ones the rule picked up by mistake (they drop
   out of the zone); new matches show as pending.
 - **OT** — mark Purdue levels and add PLCs with `CanProgram` edges from an
-  asset inventory (OpenGraph), then use the OT zone templates and the OT / ICS
-  queries to find paths from IT into the plant: [docs/OT.md](docs/OT.md).
+  asset inventory (OpenGraph). OT findings, zone templates and queries then find
+  paths from IT into the plant. Two more inputs are optional: fix costs for
+  maintenance windows, and network conduits so paths respect the firewall.
+  See [docs/OT.md](docs/OT.md).
 - **Posture over time** — one snapshot per ingest (exposure %, findings by
   severity, per-finding counts) and a diff between any two snapshots listing
   exactly which finding items appeared or were resolved.

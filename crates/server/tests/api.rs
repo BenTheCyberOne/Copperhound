@@ -1144,3 +1144,62 @@ async fn kind_styles() {
     assert_eq!(v["GHRepository"]["icon_name"], "box");
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn network_conduits() {
+    let data = std::env::temp_dir().join(format!("ch-server-net-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let up = data.join("uploads");
+    std::fs::create_dir_all(&up).unwrap();
+    std::env::set_var("COPPERHOUND_ADMIN_PASSWORD", "test-password");
+    ch_synth::generate(&ch_synth::SynthConfig { users: 400, computers: 80, groups: 40, seed: 21 }, &up).unwrap();
+    // Every computer in zone SERVERS (OpenGraph enrichment).
+    let comps: Value = serde_json::from_slice(&std::fs::read(up.join("synth_computers.json")).unwrap()).unwrap();
+    let nodes: Vec<Value> = comps["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| json!({"id": c["ObjectIdentifier"], "kinds": ["Computer"], "properties": {"net_zone": "SERVERS"}}))
+        .collect();
+    let n_hosts = nodes.len();
+    std::fs::write(up.join("zones.json"), json!({"graph": {"nodes": nodes}}).to_string()).unwrap();
+    let (st, _) = AppState::new(data.clone(), None).unwrap();
+    let app = ch_server::router(st);
+    let (_, v) = call(&app, json_req("POST", "/api/v1/login", None, json!({"username":"admin","password":"test-password"}))).await;
+    let token = v["token"].as_str().unwrap().to_string();
+    let t = token.as_str();
+    ingest_and_wait(&app, t).await;
+
+    let (s, v) = call(&app, get("/api/v1/network", t)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(v["conduits"].is_null());
+    let path_req = json!({"from": "USER1@SYNTH.LOCAL", "to_tier0": true, "network": true});
+    let (s, _) = call(&app, json_req("POST", "/api/v1/path", Some(t), path_req.clone())).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "network path without conduits");
+
+    let (s, v) = call(&app, json_req("PUT", "/api/v1/network", Some(t), json!({"attacker_zone": "IT", "conduits": [{"from": "IT", "to": "SERVERS", "services": ["telnet"]}]}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+
+    // No conduit into SERVERS: remote access and session theft on computers are blocked.
+    let (s, v) = call(&app, json_req("PUT", "/api/v1/network", Some(t), json!({"attacker_zone": "IT", "conduits": []}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let zones = v["zones"].as_array().unwrap();
+    assert!(zones.iter().any(|z| z["name"] == "SERVERS" && z["hosts"] == n_hosts as u64), "{v}");
+    let (s, closed) = call(&app, get("/api/v1/network/exposure", t)).await;
+    assert_eq!(s, StatusCode::OK, "{closed}");
+    assert!(closed["network_exposed"].as_u64().unwrap() < closed["identity_exposed"].as_u64().unwrap(), "{closed}");
+
+    // Everything open: network exposure equals identity exposure.
+    let (s, _) = call(&app, json_req("PUT", "/api/v1/network", Some(t), json!({"attacker_zone": "IT", "conduits": [{"from": "*", "to": "*", "services": ["*"]}]}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, open) = call(&app, get("/api/v1/network/exposure", t)).await;
+    assert_eq!(open["network_exposed"], open["identity_exposed"], "{open}");
+    let (s, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), path_req)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["network"], true);
+
+    let (s, v) = call(&app, json_req("DELETE", "/api/v1/network", Some(t), json!({}))).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(v["conduits"].is_null());
+    let _ = std::fs::remove_dir_all(&data);
+}

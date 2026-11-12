@@ -4,6 +4,9 @@
 
 import type {
   Alert,
+  NetworkConfig,
+  NetworkExposure,
+  NetworkStatus,
   AlertRules,
   AuthProviders,
   ChannelIn,
@@ -538,6 +541,10 @@ export const api = {
   collectors: () => call<CollectorInfo[]>("GET", "/collectors"),
   quality: () => call<QualityResponse>("GET", "/quality"),
   kindStyles: () => call<Record<string, KindStyle>>("GET", "/kind-styles"),
+  network: () => call<NetworkStatus>("GET", "/network"),
+  saveNetwork: (c: NetworkConfig) => call<NetworkStatus>("PUT", "/network", { body: c }),
+  deleteNetwork: () => call<NetworkStatus>("DELETE", "/network"),
+  networkExposure: (zone?: string) => call<NetworkExposure>("GET", `/network/exposure${zone ? `?zone=${encodeURIComponent(zone)}` : ""}`),
   saveKindStyles: (m: Record<string, KindStyle>) => call<Record<string, KindStyle>>("PUT", "/kind-styles", { body: m }),
   ldapTargets: () => call<LdapTarget[]>("GET", "/collect/ldap"),
   saveLdapTarget: (t: LdapTargetInput) => call<LdapTarget>("PUT", "/collect/ldap", { body: t }),

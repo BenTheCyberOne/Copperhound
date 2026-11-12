@@ -28,6 +28,7 @@ import {
   type ZoneInput,
   type CollectorInfo,
   type KindStyle,
+  type NetworkConfig,
   type EdgeRef,
   type FixItem,
   type TicketCreated,
@@ -546,6 +547,7 @@ function mockFixCommand(kind: string, s: MockNode, d: MockNode): string | null {
 
 /** Mock shared kind styles. */
 let mockKindStyles: Record<string, KindStyle> = { Domain: { icon: "🏰" } };
+let mockNetwork: NetworkConfig | null = null;
 
 /** Mock LDAP collection targets. */
 let mockLdap: Record<string, unknown>[] = [];
@@ -650,6 +652,15 @@ function routeV14(method: ApiRequest["method"], p: string, num: (k: string, d: n
   if (p === "/me/mfa/disable" && method === "POST") {
     mockMfa.enabled = false;
     return ok({ enabled: false });
+  }
+  if (p === "/network") {
+    if (method === "PUT") mockNetwork = b as unknown as NetworkConfig;
+    if (method === "DELETE") mockNetwork = null;
+    return ok({ conduits: mockNetwork, zones: mockNetwork ? [{ name: mockNetwork.attacker_zone, hosts: 0 }] : [], error: null });
+  }
+  if (p === "/network/exposure") {
+    if (!mockNetwork) return fail(400, "no network conduits configured");
+    return ok({ zone: "tier0", identity_exposed: 0, network_exposed: 0, total_principals: 0, elapsed_ms: 0.4 });
   }
   if (p === "/kind-styles") {
     if (method === "PUT") mockKindStyles = b as Record<string, KindStyle>;

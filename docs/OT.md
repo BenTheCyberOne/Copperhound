@@ -19,6 +19,7 @@ ingest and analysis are the same.
 | `ot_role` | any node | free text; the library and zone templates use `EWS` (engineering workstation), `HMI`, `Historian`, `SCADA`, `JumpHost`, `PLC`, `SIS`, `Vendor` |
 | `CanProgram` edge | EWS or account → controller | the source can change the target's logic, configuration or firmware ([edge reference](EDGES.md#ot)) |
 | custom node kinds | controllers and devices | e.g. `PLC`, `OTDevice`; any name works and becomes a CHQL label |
+| `net_zone` | hosts, controllers | network zone for [network reachability](#network-reachability) |
 | `fix_cost` | any node | `window`: changing it needs a maintenance window; `fixed`: it must not be changed (see [Fix cost](#fix-cost)) |
 
 Objects without `purdue_level` count as IT in the queries below.
@@ -173,11 +174,64 @@ has these weaknesses:
 - Some hosts run Windows 7 or Server 2012 R2, and some have no LAPS.
 
 Hosts below the DMZ and the PLCs have `fix_cost: window`, and the safety system
-has `fix_cost: fixed`.
+has `fix_cost: fixed`. Every OT host and device has a `net_zone` (`OT-DMZ`,
+`OT-L3`, `OT-L2`, `OT-L1`). The generator also writes `demo-ot-conduits.json`
+next to the output folder. Keep it out of the upload, and paste it under
+**Admin → Server → Network conduits** or pass it to `--conduits`. With the
+conduits, the helpdesk's four-hop path to the boiler PLC is blocked. The
+shortest path the network allows is nine hops: it goes through the Domain Admin
+session, the jump host in the OT DMZ, an engineer's session and the engineering
+workstation.
+
+## Network reachability
+
+Identity paths assume the network lets the attacker connect. In OT this is
+rarely true: the plant sits behind an OT DMZ, and only a few conduits cross
+each boundary. CopperHound can follow only the paths the conduits allow.
+
+1. **Zones.** Give hosts a `net_zone` property in the OpenGraph inventory,
+   for example `"net_zone": "OT-L2"`. Controllers can have zones too.
+2. **Conduits.** Under **Admin → Server → Network conduits**, enter which
+   services may cross from one zone to another, and the zone an attacker starts
+   in:
+
+   ```json
+   {"attacker_zone": "IT",
+    "conduits": [
+      {"from": "IT", "to": "OT-DMZ", "services": ["rdp"]},
+      {"from": "OT-DMZ", "to": "OT-L2", "services": ["rdp"]},
+      {"from": "OT-L2", "to": "OT-L1", "services": ["plc"]}]}
+   ```
+
+   The services are `smb`, `rdp`, `winrm`, `rpc` (DCOM / WMI), `mssql`, `plc`
+   and `ssh`; `*` means any service. `"*"` as `from` or `to` means every zone.
+   Within one zone everything is allowed, and with no conduit between two
+   zones nothing crosses.
+3. **Use it.** In the Path tab, tick **Only paths the network allows**. On the
+   command line, add `--conduits conduits.json` to `copperhound path` and
+   `copperhound tier0`. `GET /network/exposure` compares identity exposure with
+   network-feasible exposure.
+
+How a path is checked:
+
+- **Remote access** (`AdminTo`, `CanRDP`, `CanPSRemote`, `ExecuteDCOM`,
+  `SQLAdmin`, `CanProgram`) into a host with a zone needs a conduit from the
+  attacker's current zone for a matching service. `AdminTo` accepts any of
+  smb, rdp, winrm and rpc; `CanProgram` needs plc. The attacker then moves into
+  that zone.
+- **`HasSession`** needs administrative access (smb, rdp, winrm or rpc) to the
+  computer holding the session, and moves the attacker onto it.
+- **Other edges** (memberships, ACLs, delegation, cloud roles) are directory
+  or cloud operations and need no conduit.
+- **Starting zone.** An attacker holding a principal starts in that host's zone
+  if it is a host with one, otherwise in `attacker_zone`. Hosts without a zone
+  are never blocked.
+
+The findings, the remediation planner and posture still use identity paths.
+Network-feasible paths are a second view, not a replacement.
 
 ## Not covered yet
 
-- **Network reachability.** Firewall rules and conduits are not modelled, so a
-  path through `AdminTo` assumes the network allows the connection. Read OT
-  paths as "the identity allows it". Check the conduit rules before you rank a
-  path as exploitable.
+- **Conduits from firewall exports.** Conduits are entered by hand. Rules
+  exported from firewalls are not imported yet.
+- **Network-aware findings and planning.** These still use identity paths (see above).

@@ -9,6 +9,7 @@ import { useSession } from "../../state/SessionContext";
 import { when } from "../../util/format";
 import { BackupPanel } from "./BackupPanel";
 import { KindStylesPanel } from "./KindStylesPanel";
+import { NetworkPanel } from "./NetworkPanel";
 
 const POLL_MS = 10_000;
 
@@ -394,6 +395,7 @@ export function ServerSettingsView() {
             <WatchStatusPanel data={data} />
             <BackupPanel />
             <KindStylesPanel />
+            <NetworkPanel />
           </div>
         </div>
       )}

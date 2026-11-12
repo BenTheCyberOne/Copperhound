@@ -50,6 +50,7 @@ const ROOT_FILES: &[&str] = &[
     "zone_reviews.json",
     "ticket_targets.json",
     "tickets.json",
+    "conduits.json",
     "audit.jsonl",
     "alerts.jsonl",
 ];

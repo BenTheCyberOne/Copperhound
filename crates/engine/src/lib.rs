@@ -12,6 +12,8 @@
 //! * [`par_bfs`] — the shared level-synchronous, direction-optimising parallel
 //!   BFS behind exposure and reach; every level of the flow pass is parallel too.
 
+pub mod net;
+
 use ahash::{AHashMap, AHashSet};
 use anyhow::{anyhow, Result};
 use ch_model::{flags, NodeKind};

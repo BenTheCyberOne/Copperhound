@@ -6,8 +6,11 @@
 //! * [`simulate`] — what-if exposure for arbitrary edge / kind / node
 //!   removals, and a greedy remediation planner.
 //! * [`posture`] — snapshot summaries and finding diffs between snapshots.
+//! * [`network`] — network conduits between zones, for attack paths that
+//!   respect firewall rules.
 
 pub mod findings;
+pub mod network;
 pub mod posture;
 pub mod report;
 pub mod simulate;

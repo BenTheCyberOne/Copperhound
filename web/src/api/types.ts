@@ -74,6 +74,10 @@ export interface GraphResult {
   path_hops?: Hop[][];
   /** POST /path with all: true. */
   all_paths?: { length: number; edges: number; nodes: number; truncated: boolean };
+  /** POST /path with network: true. */
+  network?: boolean;
+  /** POST /path with network: true: the network zone of each path node (null: none). */
+  zones?: (string | null)[];
   truncated: boolean;
   elapsed_ms: number;
   /** /path, /query, /subgraph (v1.1). */
@@ -152,6 +156,37 @@ export interface PathRequest {
   all_edges: boolean;
   /** Every shortest path, as one subgraph. */
   all?: boolean;
+  /** Only paths the network conduits allow (one path; docs/OT.md). */
+  network?: boolean;
+}
+
+/** Network conduits between zones (docs/OT.md, "Network reachability"). */
+export interface NetworkConduit {
+  from: string;
+  to: string;
+  services: string[];
+  note?: string;
+}
+
+export interface NetworkConfig {
+  attacker_zone: string;
+  zones?: string[];
+  conduits: NetworkConduit[];
+}
+
+export interface NetworkStatus {
+  conduits: NetworkConfig | null;
+  /** Zones resolved against the loaded graph, with their `net_zone` host counts. */
+  zones: { name: string; hosts: number }[];
+  error: string | null;
+}
+
+export interface NetworkExposure {
+  zone: string;
+  identity_exposed: number;
+  network_exposed: number;
+  total_principals: number;
+  elapsed_ms: number;
 }
 
 export interface ExposureRow {

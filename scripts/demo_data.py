@@ -557,6 +557,7 @@ class Env:
         # the controllers, and what can program them.
         nodes = [{"id": c["ObjectIdentifier"], "kinds": ["Computer"],
                   "properties": {"purdue_level": level, "ot_role": role, "site": "Hollowbrook Mill",
+                                 "net_zone": {3.5: "OT-DMZ", 3: "OT-L3", 2: "OT-L2"}[level],
                                  # changes below the DMZ wait for a maintenance window
                                  **({"fix_cost": "window"} if level < 3.5 else {})}}
                  for c, level, role in hosts.values()]
@@ -574,7 +575,7 @@ class Env:
                           "properties": {"name": name, "purdue_level": level, "ot_role": role, "description": desc,
                                          "vendor": "Fabricated Controls",
                                          "firmware": f"{r.randint(2, 4)}.{r.randint(0, 9)}.{r.randint(0, 20)}",
-                                         "site": "Hollowbrook Mill",
+                                         "site": "Hollowbrook Mill", "net_zone": "OT-L1",
                                          # the safety system's configuration is certified: never changed
                                          "fix_cost": "fixed" if role == "SIS" else "window"}})
         ids = {**{n: c["ObjectIdentifier"] for n, c in h.items()}, **{d[0]: f"ot-{d[0].lower()}" for d in devices}}
@@ -582,6 +583,13 @@ class Env:
                 ("OT-EWS02", "SIS-BOILER"), ("PLC-LINE1", "DRIVE-L1-01")]
         edges = [{"kind": "CanProgram", "start": {"value": ids[a]}, "end": {"value": ids[b]}} for a, b in prog]
         self.ot_graph = {"metadata": {"source_kind": "OTInventory"}, "graph": {"nodes": nodes, "edges": edges}}
+        # Firewall conduits between the zones (not graph data: written next to the output folder).
+        self.ot_conduits = {"attacker_zone": "IT", "conduits": [
+            {"from": "IT", "to": "OT-DMZ", "services": ["rdp"], "note": "IT users to the jump host and historian replica"},
+            {"from": "OT-DMZ", "to": "OT-L3", "services": ["rdp", "mssql"]},
+            {"from": "OT-DMZ", "to": "OT-L2", "services": ["rdp"]},
+            {"from": "OT-L3", "to": "OT-L2", "services": ["rpc"], "note": "SCADA server polls the HMIs"},
+            {"from": "OT-L2", "to": "OT-L1", "services": ["plc"]}]}
 
     # ---- output
     def write(self, out):
@@ -613,6 +621,10 @@ class Env:
         if getattr(self, "ot_graph", None):
             with open(os.path.join(out, f"{stamp}_ot_inventory.json"), "w", encoding="utf-8") as f:
                 json.dump(self.ot_graph, f, separators=(",", ":"))
+            conduits = os.path.normpath(out) + "-conduits.json"
+            with open(conduits, "w", encoding="utf-8") as f:
+                json.dump(self.ot_conduits, f, indent=2)
+            print(f"wrote {conduits} (network conduits; not graph data, keep it out of the upload)")
         az = self.azure()
         with open(os.path.join(out, f"{stamp}_azurehound.json"), "w", encoding="utf-8") as f:
             json.dump({"data": az, "meta": {"methods": 0, "type": "azure", "count": len(az), "version": 5}}, f, separators=(",", ":"))

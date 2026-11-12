@@ -16,7 +16,7 @@ The web UI (served from `/`) is built on this API, and scripts can use it too. P
 5. [Reports, notifications, schedules and alerts](#5-reports-notifications-schedules-and-alerts)
    - [Reports](#reports) · [Notification channels](#notification-channels-admin) · [Scheduled reports](#scheduled-reports-admin) · [Change alerts](#change-alerts)
 6. [Administration](#6-administration)
-   - [Own account and API tokens](#own-account-and-api-tokens) · [Two-factor sign-in](#two-factor-sign-in-totp) · [Users](#users-admin) · [Audit log](#audit-log-admin) · [Settings and watch folder](#settings-and-watch-folder-admin) · [Built-in LDAP collector](#built-in-ldap-collector-admin) · [Collector clients](#collector-clients-admin) · [Node kind styles](#node-kind-styles) · [Backup and restore](#backup-and-restore-admin) · [Database management](#database-management-admin)
+   - [Own account and API tokens](#own-account-and-api-tokens) · [Two-factor sign-in](#two-factor-sign-in-totp) · [Users](#users-admin) · [Audit log](#audit-log-admin) · [Settings and watch folder](#settings-and-watch-folder-admin) · [Built-in LDAP collector](#built-in-ldap-collector-admin) · [Collector clients](#collector-clients-admin) · [Node kind styles](#node-kind-styles) · [Network conduits](#network-conduits) · [Backup and restore](#backup-and-restore-admin) · [Database management](#database-management-admin)
 7. [Single sign-on](#7-single-sign-on)
    - [Sign-in providers](#sign-in-providers) · [OpenID Connect](#openid-connect) · [SSO accounts](#sso-accounts) · [OIDC configuration](#oidc-configuration-admin) · [SAML 2.0](#saml-20) · [Break-glass](#break-glass-when-may-the-built-in-admin-use-its-password) · [SSO audit actions](#sso-audit-actions)
 8. [BloodHound-compatible API (`/api/v2`)](#8-bloodhound-compatible-api-apiv2)
@@ -225,6 +225,8 @@ Minimum role per endpoint (see [Roles](#roles)). "public" = no authentication.
 | GET, POST | `/saved-queries` | viewer, analyst | [Saved queries](#saved-custom-queries) |
 | PUT, DELETE | `/saved-queries/{id}` | analyst | [Saved queries](#saved-custom-queries) |
 | GET | `/tier0` | viewer | [Tier Zero](#tier-zero-exposure-and-choke-points) |
+| GET, PUT, DELETE | `/network` | viewer, admin | [Network conduits](#network-conduits) |
+| GET | `/network/exposure` | viewer | [Network conduits](#network-conduits) |
 | GET | `/findings`, `/findings/{id}` | viewer | [Findings](#findings) |
 | GET | `/findings-involving` | viewer | [Findings](#findings) |
 | GET | `/findings/{id}/history` | viewer | [Finding history](#finding-history) |
@@ -522,6 +524,9 @@ longer in the loaded graph.
   `{"length", "nodes", "edges", "truncated"}` (`nodes` / `edges` are counts).
 - Whether Tier Zero targets span AD and Entra ID follows the `analysis.unified_tier0`
   [setting](#settings-and-watch-folder-admin).
+- With `"network": true` the path must also pass the [network conduits](#network-conduits): the
+  result is the shortest path the firewall rules allow (one path; `all` is ignored), with `"network": true`
+  and `"zones"` (the `net_zone` of each path node, `null` for none). 400 when no conduits are configured.
 
 Results include `"hops": [{"src","dst","kind"}]` in path order (one entry per hop, even when several kinds
 connect the same pair).
@@ -734,18 +739,21 @@ All fields optional (`zone` defaults to `tier0`). Response:
 
 ### Remediation planner
 
-`POST /remediation-plan` `{"zone":"tier0","steps":10,"fixed_kinds":["Contains"],"protect_target_membership": true}`
+`POST /remediation-plan` `{"zone":"tier0","steps":10,"fixed_kinds":["Contains"],"protect_target_membership": true, "respect_fix_cost": true, "live_first": false}`
 
 Each step picks the **choke object** whose fix cuts the most principals off from the zone *entirely*,
 computed exactly with a dominator tree over all attack paths. The fix is to remove the choke object's onward
 attack edges (listed in `edges`; usually one or a few, e.g. a group's `AdminTo` on a Tier Zero server). The
 plan is recomputed after every step. `fixed_kinds` are never proposed
 for removal; with `protect_target_membership` (default true) members of zone groups count as part of the
-zone, so the planner never proposes removing admins from admin groups. Response:
+zone, so the planner never proposes removing admins from admin groups. With `respect_fix_cost` (default true)
+the `fix_cost` node property applies: choke objects with an edge to or from a `fixed` object are skipped, and
+steps touching a `window` object have `"needs_window": true`; `live_first` puts every step without a window
+first ([OT.md](OT.md#fix-cost)). Response:
 ```json
 {"baseline": n, "truncated": false, "elapsed_ms": n,
  "steps": [{"node": Node, "edges": [{"src": Node, "dst": Node, "kind": "AdminTo"}],
-            "principals_cut": n, "exposed_after": n, "cumulative_reduction_percent": p}]}
+            "principals_cut": n, "exposed_after": n, "cumulative_reduction_percent": p, "needs_window": false}]}
 ```
 `edges` is capped at 50 per step (`edge_count` gives the full number). Runs synchronously; may take seconds
 on very large graphs (honours `timeout_ms`, default 120000).
@@ -1088,6 +1096,27 @@ settings still win).
 BloodHound's `POST /api/v2/custom-nodes` (admin)
 `{"custom_types": {"Kind": {"icon": {"type", "name", "color"}}}}` merges colours (Font Awesome names are kept
 as `icon_name`, not drawn).
+
+### Network conduits
+
+Firewall conduits between network zones, so paths and exposure can respect them (details:
+[OT.md](OT.md#network-reachability)). Hosts are placed in zones by their `net_zone` property.
+
+`GET /network` (viewer) → `{"conduits": Conduits | null, "zones": [{"name", "hosts"}], "error": null}`;
+`zones` and `error` are resolved against the loaded graph. `PUT /network` (admin) with Conduits replaces the
+configuration (400 on unknown services or invalid names); `DELETE /network` (admin) removes it.
+
+```json
+{"attacker_zone": "IT",
+ "conduits": [{"from": "IT", "to": "OT-DMZ", "services": ["rdp"], "note": "jump host"},
+              {"from": "OT-L2", "to": "OT-L1", "services": ["plc"]}]}
+```
+
+Services: `smb`, `rdp`, `winrm`, `rpc`, `mssql`, `plc`, `ssh`, `*`; `"*"` as `from` or `to` is every zone.
+
+`GET /network/exposure?zone=tier0` (viewer) → `{"zone", "identity_exposed", "network_exposed",
+"total_principals", "elapsed_ms"}`: principals with any attack path to the zone, and those with a path the
+conduits allow.
 
 ### Backup and restore (admin)
 

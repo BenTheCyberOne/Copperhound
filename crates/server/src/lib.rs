@@ -19,6 +19,7 @@ pub mod hmac_auth;
 pub mod kindstyle;
 pub mod ldapcollect;
 pub mod mfa;
+pub mod network;
 pub mod notify;
 pub mod quality;
 pub mod risk;
@@ -97,6 +98,8 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/zones/{id}/members", get(analysis::zone_members_api))
         .route("/zones/{id}/review", get(zonereview::get_review).post(zonereview::post_review))
         .route("/zones/{id}/exposure", get(analysis::zone_exposure))
+        .route("/network", get(network::get_network).put(network::put_network).delete(network::delete_network))
+        .route("/network/exposure", get(network::network_exposure))
         .route("/report", get(analysis::report))
         .route("/posture", get(analysis::posture))
         .route("/posture/diff", get(analysis::posture_diff))

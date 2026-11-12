@@ -24,7 +24,7 @@ container serves the web UI and REST API.
 **Documentation:** [User guide](docs/USER_GUIDE.md) · [Deployment](docs/DEPLOYMENT.md) ·
 [Data sources](docs/DATA.md) · [REST API](docs/API.md) · [CHQL](docs/CHQL.md) ·
 [Edge reference](docs/EDGES.md) · [OT](docs/OT.md) · [Performance](docs/PERFORMANCE.md) ·
-[Architecture](docs/ARCHITECTURE.md)
+[Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md)
 
 ## Quick start (Docker)
 
@@ -191,6 +191,17 @@ Formats, raw LDAP collection, derived edges, Tier Zero defaults and merge rules:
 | `tools/` | helper scripts (`ldap-member-ranges.sh` / `.ps1`: complete large-group `member` ranges for LDIF dumps) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the roadmap.
+
+## Changelog
+
+Each version, in short; the details are in [CHANGELOG.md](CHANGELOG.md).
+
+- **Unreleased**: OT support (`CanProgram` edges, Purdue levels, OT findings,
+  queries and zone templates), fix costs in the remediation planner, network
+  reachability through firewall conduits, and fixes from a security review
+  (query and ingest denial of service, report and PowerShell injection, SSO
+  login CSRF, secret handling).
+- **0.1.0** (2026-11-11): first public release.
 
 ## License
 

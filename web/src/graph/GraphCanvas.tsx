@@ -204,14 +204,23 @@ export function GraphCanvas({
       refreshItems([], [edge]);
     });
 
-    // Node dragging.
-    sigma.on("downNode", ({ node }) => {
+    // Node dragging, with the primary button only: a right-click opens the
+    // context menu, whose release never reaches the canvas.
+    sigma.on("downNode", ({ node, event }) => {
+      const o = event.original;
+      if ("button" in o && o.button !== 0) return;
       dragged = node;
       stopForceLayout();
       if (!sigma.getCustomBBox()) sigma.setCustomBBox(sigma.getBBox());
     });
     sigma.on("moveBody", ({ event }) => {
       if (!dragged) return;
+      // The release happened elsewhere (outside the canvas, over a menu or dialog).
+      const o = event.original;
+      if ("buttons" in o && (o.buttons & 1) === 0) {
+        dragged = null;
+        return;
+      }
       const pos = sigma.viewportToGraph(event);
       store.graph.mergeNodeAttributes(dragged, { x: pos.x, y: pos.y });
       event.preventSigmaDefault();

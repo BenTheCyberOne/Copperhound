@@ -197,6 +197,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the road
 
 Each version, in short; the details are in [CHANGELOG.md](CHANGELOG.md).
 
+- **0.3.0** (2026-11-13): zone weights and cross-zone planning.
+  - Weight each zone, and the remediation planner ranks fixes by weighted
+    exposure across all zones at once; reports gain a zone section.
+  - **Add to zone…** from the canvas, and new zone templates for
+    infrastructure, risky accounts and the cloud.
 - **0.2.0** (2026-11-13): OT support and bug fixes.
   - OT: `CanProgram` edges, Purdue levels, OT findings, queries and zone
     templates; fix costs in the remediation planner; network reachability

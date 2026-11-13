@@ -6,6 +6,10 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+Zone weights and cross-zone planning.
+
 ### Added
 
 - **Cross-zone remediation plans**. Zones have a weight (0-100, default 1;
@@ -26,6 +30,11 @@ Notable changes to CopperHound. The format follows
 - Reports (HTML and Markdown, including scheduled ones) have a **Zones**
   section with exposure per zone and the cross-zone plan, when custom zones
   exist. `copperhound report --zone …` does the same from the command line.
+
+### Fixed
+
+- On the canvas, a node kept following the mouse after a right-click
+  (for example after **Add to zone…**).
 
 ## [0.2.0] - 2026-11-13
 

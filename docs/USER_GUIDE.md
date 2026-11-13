@@ -157,7 +157,10 @@ Open a finding to see its items, guidance and history across snapshots. From the
 servers", defined by a CHQL selector. Each zone gets its own exposure, choke points and
 plan. On the **Review** tab, certify the members that belong and revoke the ones the rule
 picked up by mistake; revoked members leave the zone. **Start from a template** offers
-OT zones (Purdue levels, engineering workstations, OT DMZ); see [OT.md](OT.md).
+ready-made selectors by category: infrastructure (domain controllers, PKI, member servers,
+backup), risky accounts and hosts (unconstrained delegation, service accounts, operators,
+`adminCount`), cloud (Azure control plane, key vaults) and OT (Purdue levels, engineering
+workstations, OT DMZ; see [OT.md](OT.md)).
 
 To add objects without writing a query, right-click one on the canvas (or use the
 details drawer) → **Add to zone…**, and pick a zone or start a new one. Objects added by

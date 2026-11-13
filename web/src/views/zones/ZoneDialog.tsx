@@ -5,40 +5,113 @@ import { Modal } from "../../components/Modal";
 import { NumberField } from "../../components/NumberField";
 import { ErrorExcerpt } from "../../tabs/queries/QueryEditor";
 
-/** Starting points for common zones. The OT ones use the `purdue_level` and
- *  `ot_role` properties of docs/OT.md, set by an OpenGraph asset inventory. */
-const TEMPLATES: { name: string; description: string; selector: string }[] = [
+/** Starting points for common zones, by category. The OT ones use the
+ *  `purdue_level` and `ot_role` properties of docs/OT.md, set by an OpenGraph
+ *  asset inventory. */
+const TEMPLATE_GROUPS: { group: string; templates: { name: string; description: string; selector: string }[] }[] = [
   {
-    name: "OT assets (Purdue 0-3)",
-    description: "Control systems below the OT DMZ",
-    selector: "MATCH (n) WHERE n.purdue_level <= 3 RETURN n",
+    group: "Infrastructure",
+    templates: [
+      {
+        name: "Domain controllers",
+        description: "Members of Domain Controllers (RID 516)",
+        selector: "MATCH (c:Computer)-[:MemberOf]->(g:Group) WHERE g.objectid ENDS WITH '-516' RETURN c",
+      },
+      {
+        name: "PKI (AD CS)",
+        description: "Certificate authorities, the NTAuth store and certificate templates",
+        selector: "MATCH (n:EnterpriseCA|RootCA|AIACA|NTAuthStore|CertTemplate) RETURN n",
+      },
+      {
+        name: "Member servers (Tier 1)",
+        description: "Computers running a server operating system",
+        selector: "MATCH (c:Computer) WHERE c.operatingsystem CONTAINS 'Server' RETURN c",
+      },
+      {
+        name: "Backup infrastructure",
+        description: "Backup servers by name or description (edit the keyword)",
+        selector: "MATCH (c:Computer) WHERE c.name CONTAINS 'backup' OR c.description CONTAINS 'backup' RETURN c",
+      },
+    ],
   },
   {
-    name: "Controllers (Purdue 0-1)",
-    description: "PLCs, safety systems, RTUs and field devices",
-    selector: "MATCH (n) WHERE n.purdue_level <= 1 RETURN n",
+    group: "Risky accounts and hosts",
+    templates: [
+      {
+        name: "Unconstrained delegation hosts",
+        description: "Computers trusted for unconstrained delegation (domain controllers included)",
+        selector: "MATCH (c:Computer {unconstraineddelegation:true}) RETURN c",
+      },
+      {
+        name: "Service accounts",
+        description: "User accounts with a service principal name",
+        selector: "MATCH (u:User {hasspn:true}) RETURN u",
+      },
+      {
+        name: "Operators",
+        description: "Members of Account, Server and Backup Operators",
+        selector:
+          "MATCH (n)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH 'S-1-5-32-548' OR g.objectid ENDS WITH 'S-1-5-32-549' OR g.objectid ENDS WITH 'S-1-5-32-551' RETURN n",
+      },
+      {
+        name: "Protected admin objects",
+        description: "Objects with adminCount set (may include former admins)",
+        selector: "MATCH (n {admincount:true}) RETURN n",
+      },
+    ],
   },
   {
-    name: "Engineering workstations",
-    description: "Hosts that can program controllers",
-    selector: "MATCH (n) WHERE n.ot_role = 'EWS' RETURN n",
+    group: "Cloud (Entra ID / Azure)",
+    templates: [
+      {
+        name: "Azure control plane",
+        description: "Entra roles, tenants, subscriptions and management groups",
+        selector: "MATCH (n:AZRole|AZTenant|AZSubscription|AZManagementGroup) RETURN n",
+      },
+      {
+        name: "Key vaults",
+        description: "Azure key vaults",
+        selector: "MATCH (n:AZKeyVault) RETURN n",
+      },
+    ],
   },
   {
-    name: "OT DMZ (Purdue 3.5)",
-    description: "Jump hosts, historian replicas and patch servers between IT and OT",
-    selector: "MATCH (n) WHERE n.purdue_level = 3.5 RETURN n",
-  },
-  {
-    name: "OT organizational unit",
-    description: "Everything under the OT OU (edit the distinguished name)",
-    selector: "MATCH (n) WHERE n.distinguishedname ENDS WITH ',OU=PLANT,DC=CORP,DC=LOCAL' RETURN n",
-  },
-  {
-    name: "OT domain",
-    description: "Every object of a separate OT domain (edit the domain name)",
-    selector: "MATCH (n) WHERE n.domain = 'OT.CORP.LOCAL' RETURN n",
+    group: "OT / ICS",
+    templates: [
+      {
+        name: "OT assets (Purdue 0-3)",
+        description: "Control systems below the OT DMZ",
+        selector: "MATCH (n) WHERE n.purdue_level <= 3 RETURN n",
+      },
+      {
+        name: "Controllers (Purdue 0-1)",
+        description: "PLCs, safety systems, RTUs and field devices",
+        selector: "MATCH (n) WHERE n.purdue_level <= 1 RETURN n",
+      },
+      {
+        name: "Engineering workstations",
+        description: "Hosts that can program controllers",
+        selector: "MATCH (n) WHERE n.ot_role = 'EWS' RETURN n",
+      },
+      {
+        name: "OT DMZ (Purdue 3.5)",
+        description: "Jump hosts, historian replicas and patch servers between IT and OT",
+        selector: "MATCH (n) WHERE n.purdue_level = 3.5 RETURN n",
+      },
+      {
+        name: "OT organizational unit",
+        description: "Everything under the OT OU (edit the distinguished name)",
+        selector: "MATCH (n) WHERE n.distinguishedname ENDS WITH ',OU=PLANT,DC=CORP,DC=LOCAL' RETURN n",
+      },
+      {
+        name: "OT domain",
+        description: "Every object of a separate OT domain (edit the domain name)",
+        selector: "MATCH (n) WHERE n.domain = 'OT.CORP.LOCAL' RETURN n",
+      },
+    ],
   },
 ];
+const TEMPLATES = TEMPLATE_GROUPS.flatMap((g) => g.templates);
 
 interface Props {
   editing: Zone | null;
@@ -89,10 +162,14 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
               }}
             >
               <option value="">Choose…</option>
-              {TEMPLATES.map((t, i) => (
-                <option key={t.name} value={i}>
-                  {t.name}
-                </option>
+              {TEMPLATE_GROUPS.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.templates.map((t) => (
+                    <option key={t.name} value={TEMPLATES.indexOf(t)} title={t.description}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>

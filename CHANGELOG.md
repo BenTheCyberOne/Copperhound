@@ -19,6 +19,10 @@ Notable changes to CopperHound. The format follows
   objects are members whatever the selector matches and are certified in
   zone review; a zone's selector may now be empty.
   `POST /zones/{id}/objects`.
+- Zone templates for infrastructure (domain controllers, PKI, member
+  servers, backup), risky accounts and hosts (unconstrained delegation,
+  service accounts, operators, `adminCount`) and the cloud (Azure control
+  plane, key vaults), grouped by category in **Start from a template**.
 - Reports (HTML and Markdown, including scheduled ones) have a **Zones**
   section with exposure per zone and the cross-zone plan, when custom zones
   exist. `copperhound report --zone …` does the same from the command line.

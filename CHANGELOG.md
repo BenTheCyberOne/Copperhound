@@ -6,6 +6,10 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
+OT support and bug fixes.
+
 ### Added
 
 - **Operational technology (OT)**. See [docs/OT.md](docs/OT.md).

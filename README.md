@@ -196,11 +196,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the road
 
 Each version, in short; the details are in [CHANGELOG.md](CHANGELOG.md).
 
-- **Unreleased**: OT support (`CanProgram` edges, Purdue levels, OT findings,
-  queries and zone templates), fix costs in the remediation planner, network
-  reachability through firewall conduits, and fixes from a security review
-  (query and ingest denial of service, report and PowerShell injection, SSO
-  login CSRF, secret handling).
+- **0.2.0** (2026-11-13): OT support and bug fixes.
+  - OT: `CanProgram` edges, Purdue levels, OT findings, queries and zone
+    templates; fix costs in the remediation planner; network reachability
+    through firewall conduits. See [docs/OT.md](docs/OT.md).
+  - Fixes from a security review: query and ingest denial of service, report
+    and PowerShell injection, SSO login CSRF, secret handling. Plus query
+    correctness fixes, and BloodHound-signed uploads over 8 MiB work again.
 - **0.1.0** (2026-11-11): first public release.
 
 ## License

@@ -367,6 +367,10 @@ listed in docs/CHQL.md, "Predicate pushdown".
   only mark it dead and reuse every buffer. Results match the original
   from-scratch iterative planner exactly (kept as a test reference); a 3-step
   plan on 3.75M nodes / 19.7M edges takes ~1 s instead of ~25 s.
+  `plan_weighted` keeps one such planner per zone; each step sums
+  weight × dominator-subtree count per node over all zones (every candidate,
+  not only each zone's top list), picks the best, and deletes it from every
+  zone it is not a member of. Also checked against a from-scratch reference.
 
 ## Post-processing
 

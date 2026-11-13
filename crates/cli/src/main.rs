@@ -103,6 +103,15 @@ enum Cmd {
         /// Propose fixes that need no maintenance window first (node property `fix_cost`).
         #[arg(long)]
         live_first: bool,
+        /// Also plan for this zone, weighted: `NAME=WEIGHT:SELECTOR` (CHQL),
+        /// e.g. `Finance=3:MATCH (c:Computer) WHERE c.name STARTS WITH 'FIN' RETURN c`.
+        /// Repeatable. Each step then cuts the most weighted exposure across
+        /// Tier Zero and every zone.
+        #[arg(long = "zone", value_name = "NAME=WEIGHT:SELECTOR")]
+        zones: Vec<String>,
+        /// Weight of Tier Zero when `--zone` is given (0 leaves it out).
+        #[arg(long, default_value_t = 1)]
+        tier0_weight: u32,
     },
     /// Assessment report (HTML, Markdown or CSV) for a graph.
     Report {
@@ -117,6 +126,13 @@ enum Cmd {
         /// Items listed per finding.
         #[arg(long, default_value_t = 25)]
         items: usize,
+        /// Add a zone section and a cross-zone plan: `NAME=WEIGHT:SELECTOR`
+        /// (CHQL), repeatable, as for `plan --zone`.
+        #[arg(long = "zone", value_name = "NAME=WEIGHT:SELECTOR")]
+        zones: Vec<String>,
+        /// Weight of Tier Zero in the cross-zone plan.
+        #[arg(long, default_value_t = 1)]
+        tier0_weight: u32,
     },
     /// Exit 0 if a local server answers /api/v1/health (for container health checks).
     Healthcheck {
@@ -324,7 +340,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Plan { graph, steps, live_first } => {
+        Cmd::Plan { graph, steps, live_first, zones, tier0_weight } => {
             let g = open(&graph)?;
             let tier0 = g.nodes_with_flag(flags::TIER0);
             let t = Instant::now();
@@ -335,6 +351,9 @@ fn main() -> Result<()> {
                 live_first,
                 ..Default::default()
             };
+            if !zones.is_empty() {
+                return weighted_plan(&g, tier0, tier0_weight, &zones, &opts, t);
+            }
             let p = ch_analysis::simulate::plan(&g, &tier0, &opts, &ch_query::Cancel::never());
             println!("baseline exposed principals: {}   ({:.2}s)", num(p.baseline), t.elapsed().as_secs_f64());
             for (i, s) in p.steps.iter().enumerate() {
@@ -357,7 +376,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Report { graph, out, title, plan_steps, items } => {
+        Cmd::Report { graph, out, title, plan_steps, items, zones, tier0_weight } => {
             let g = open(&graph)?;
             let t = Instant::now();
             let tier0 = g.nodes_with_flag(flags::TIER0);
@@ -365,15 +384,19 @@ fn main() -> Result<()> {
             let findings = ch_analysis::findings::evaluate(&g, &tier0, &never, &|_, _| {});
             let rep = ch_analysis::simulate::exposure_with(&g, &tier0, &ch_analysis::Removal::default(), 10);
             let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("html").to_ascii_lowercase();
-            let plan = (plan_steps > 0 && ext != "csv").then(|| {
-                let opts = ch_analysis::simulate::PlanOptions {
-                    steps: plan_steps,
-                    protect_target_membership: true,
-                    node_cost: ch_analysis::simulate::fix_costs(&g),
-                    ..Default::default()
-                };
-                ch_analysis::simulate::plan(&g, &tier0, &opts, &never)
-            });
+            let opts = ch_analysis::simulate::PlanOptions {
+                steps: plan_steps,
+                protect_target_membership: true,
+                node_cost: ch_analysis::simulate::fix_costs(&g),
+                ..Default::default()
+            };
+            let plan = (plan_steps > 0 && ext != "csv").then(|| ch_analysis::simulate::plan(&g, &tier0, &opts, &never));
+            let (zone_reports, cross) = if zones.is_empty() || ext == "csv" {
+                (Vec::new(), None)
+            } else {
+                let zs = zone_args(&g, tier0.clone(), tier0_weight, &zones)?;
+                ch_analysis::report::zone_sections(&g, &zs, (plan_steps > 0).then_some(&opts), &never)
+            };
             let generated = humantime::format_rfc3339_seconds(std::time::SystemTime::now()).to_string();
             let snap = graph.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
             let input = ch_analysis::report::ReportInput {
@@ -387,6 +410,8 @@ fn main() -> Result<()> {
                 plan: plan.as_ref(),
                 items_per_finding: items,
                 accepted: &[],
+                zones: &zone_reports,
+                cross_zone_plan: cross.as_ref(),
             };
             let text = match ext.as_str() {
                 "md" | "markdown" => ch_analysis::report::render_markdown(&input),
@@ -598,6 +623,85 @@ fn latency(times: &mut [f64]) -> String {
     } else {
         format!("min {:.2} ms, median {med:.2} ms ({} runs)", times[0], times.len())
     }
+}
+
+/// Parse `NAME=WEIGHT:SELECTOR`.
+fn parse_zone_arg(a: &str) -> anyhow::Result<(String, u32, String)> {
+    let bad = || anyhow::anyhow!("--zone '{a}': expected NAME=WEIGHT:SELECTOR");
+    let (name, rest) = a.split_once('=').ok_or_else(bad)?;
+    let (w, sel) = rest.split_once(':').ok_or_else(bad)?;
+    let w: u32 = w.trim().parse().map_err(|_| bad())?;
+    anyhow::ensure!(w <= 100, "--zone '{name}': weight must be 0-100");
+    anyhow::ensure!(!name.trim().is_empty() && !sel.trim().is_empty(), bad());
+    Ok((name.trim().to_string(), w, sel.trim().to_string()))
+}
+
+/// Tier Zero plus the `--zone` arguments, as `(name, weight, members)`.
+fn zone_args(g: &ch_store::Graph, tier0: Vec<u32>, tier0_weight: u32, args: &[String]) -> anyhow::Result<Vec<(String, u32, Vec<u32>)>> {
+    anyhow::ensure!(tier0_weight <= 100, "--tier0-weight must be 0-100");
+    let mut zones: Vec<(String, u32, Vec<u32>)> = vec![("Tier Zero".into(), tier0_weight, tier0)];
+    for a in args {
+        let (name, w, sel) = parse_zone_arg(a)?;
+        let cap = g.node_count().max(1);
+        let r = ch_query::run_capped(g, &sel, cap, cap, &ch_query::Cancel::never()).map_err(|e| anyhow::anyhow!("--zone '{name}': {e}"))?;
+        let mut m = r.nodes;
+        m.sort_unstable();
+        m.dedup();
+        zones.push((name, w, m));
+    }
+    Ok(zones)
+}
+
+fn weighted_plan(
+    g: &ch_store::Graph,
+    tier0: Vec<u32>,
+    tier0_weight: u32,
+    args: &[String],
+    opts: &ch_analysis::simulate::PlanOptions,
+    t: Instant,
+) -> anyhow::Result<()> {
+    use ch_analysis::simulate::{plan_weighted, WeightedZone};
+    let zones = zone_args(g, tier0, tier0_weight, args)?;
+    anyhow::ensure!(zones.iter().any(|z| z.1 > 0), "every zone has weight 0");
+    let wz: Vec<WeightedZone> = zones.iter().map(|z| WeightedZone { weight: z.1, targets: &z.2 }).collect();
+    let p = plan_weighted(g, &wz, opts, &ch_query::Cancel::never());
+    println!("weighted exposure: {}   ({:.2}s)", num(p.baseline), t.elapsed().as_secs_f64());
+    for (z, b) in zones.iter().zip(&p.zone_baselines) {
+        if z.1 > 0 {
+            println!("  {:<24} weight {:>3}  members {:>8}  exposed {:>8}", z.0, z.1, num(z.2.len() as u64), num(*b));
+        } else {
+            println!("  {:<24} weight   0  (left out)", z.0);
+        }
+    }
+    for (i, s) in p.steps.iter().enumerate() {
+        println!(
+            "  {:>2}. sever {} ({}): weighted cut {} → {} left ({:.1}% total cut){}",
+            i + 1,
+            g.name(s.node),
+            g.kind_name(s.node),
+            num(s.score),
+            num(s.score_after),
+            s.cumulative_reduction_percent,
+            if s.needs_window { "  [maintenance window]" } else { "" }
+        );
+        let per: Vec<String> = zones
+            .iter()
+            .zip(&s.zones)
+            .filter(|(_, c)| c.principals_cut > 0)
+            .map(|(z, c)| format!("{}: -{}", z.0, num(c.principals_cut)))
+            .collect();
+        println!("        principals cut per zone: {}", per.join(", "));
+        for e in s.edges.iter().take(5) {
+            println!("        remove {} -[{}]-> {}", g.name(e.0), g.edge_kind_name(e.2), g.name(e.1));
+        }
+        if s.edges.len() > 5 {
+            println!("        … and {} more edges", s.edges.len() - 5);
+        }
+    }
+    if p.truncated {
+        println!("  (stopped early)");
+    }
+    Ok(())
 }
 
 fn num(n: u64) -> String {

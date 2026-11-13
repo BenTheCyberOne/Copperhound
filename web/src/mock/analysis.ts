@@ -18,7 +18,7 @@ import type {
   Snapshot,
   ZoneReviewDecision,
   Zone,
-  ZoneInput, RiskAcceptance } from "../api/types";
+  ZoneInput, ZoneObjectsResponse, RiskAcceptance } from "../api/types";
 import { edges, nodes, type MockNode } from "./data";
 import { computeExposure, edgeId, exposureState, tier0Targets, type Removal } from "./exposure";
 import { edgeAllowed, outAdj, publicNode, resultFrom } from "./graph";
@@ -70,7 +70,9 @@ const zoneDefs: Omit<Zone, "member_count">[] = [
     description: "Objects flagged Tier Zero (built in).",
     selector: "MATCH (n {tier0:true}) RETURN n",
     color: "#f5f5f4",
+    objects: [],
     builtin: true,
+    weight: 5,
   },
   {
     id: "z-azure-control",
@@ -78,7 +80,9 @@ const zoneDefs: Omit<Zone, "member_count">[] = [
     description: "Entra ID roles, the tenant and production subscription.",
     selector: "MATCH (n:AZRole|AZTenant|AZSubscription) RETURN n",
     color: "#38bdf8",
+    objects: [],
     builtin: false,
+    weight: 3,
   },
   {
     id: "z-db",
@@ -86,7 +90,9 @@ const zoneDefs: Omit<Zone, "member_count">[] = [
     description: "SQL servers and their admin group.",
     selector: "MATCH (n) WHERE n.name STARTS WITH 'SQL' RETURN n",
     color: "#f59e0b",
+    objects: [],
     builtin: false,
+    weight: 2,
   },
 ];
 let zoneSeq = 0;
@@ -99,12 +105,14 @@ export function zoneSelectorMatches(zoneId: string): MockNode[] | null {
   const z = zoneDefs.find((x) => x.id === zoneId);
   if (!z) return null;
   if (z.builtin) return nodes.filter((n) => n.tier0);
+  const byHand = new Set(z.objects);
+  let ids = new Set<NodeId>();
   try {
-    const ids = new Set(runChql(z.selector, 100000).nodes.map((n) => n.id));
-    return nodes.filter((n) => ids.has(n.id));
+    if (z.selector.trim()) ids = new Set(runChql(z.selector, 100000).nodes.map((n) => n.id));
   } catch {
-    return [];
+    // A broken selector matches nothing; hand-added objects still count.
   }
+  return nodes.filter((n) => ids.has(n.id) || byHand.has(n.objectid.toUpperCase()));
 }
 
 export function zoneMembers(zoneId: string): MockNode[] | null {
@@ -122,14 +130,17 @@ export function saveZone(input: Partial<ZoneInput>, id?: string): Zone {
   if (id && !existing) throw new ZoneError("zone not found");
   if (existing?.builtin) throw new ZoneError("the built-in Tier Zero zone cannot be edited");
   if (!input.name?.trim()) throw new ZoneError("name is required");
+  if (input.weight !== undefined && !validWeight(input.weight)) throw new ZoneError("weight must be 0-100");
   const selector = input.selector?.trim() ?? "";
-  if (!selector) throw new ZoneError("selector is required");
-  try {
-    parseChql(selector);
-    if (runChql(selector, 100000).columns) throw new ZoneError("selector must return nodes, not columns", null, "semantic");
-  } catch (e) {
-    if (e instanceof ChqlError) throw new ZoneError(e.message, e.position, e.code);
-    throw e;
+  const objects = input.objects ? cleanOids(input.objects) : undefined;
+  if (selector) {
+    try {
+      parseChql(selector);
+      if (runChql(selector, 100000).columns) throw new ZoneError("selector must return nodes, not columns", null, "semantic");
+    } catch (e) {
+      if (e instanceof ChqlError) throw new ZoneError(e.message, e.position, e.code);
+      throw e;
+    }
   }
   const fields = {
     name: input.name.trim(),
@@ -139,11 +150,66 @@ export function saveZone(input: Partial<ZoneInput>, id?: string): Zone {
   };
   if (existing) {
     Object.assign(existing, fields);
+    if (input.weight !== undefined) existing.weight = input.weight;
+    if (objects) existing.objects = objects;
     return { ...existing, member_count: zoneMembers(existing.id)!.length };
   }
-  const z = { id: `z-${++zoneSeq}-${Date.now().toString(36)}`, builtin: false, ...fields };
+  const z = { id: `z-${++zoneSeq}-${Date.now().toString(36)}`, builtin: false, weight: input.weight ?? 1, objects: objects ?? [], ...fields };
   zoneDefs.push(z);
+  certify(z.id, z.objects);
   return { ...z, member_count: zoneMembers(z.id)!.length };
+}
+
+function cleanOids(oids: unknown[]): string[] {
+  const out = new Set<string>();
+  for (const o of oids) {
+    const s = String(o).trim().toUpperCase();
+    if (!s || s.length > 256) throw new ZoneError("object ids must be 1-256 characters");
+    if (!nodes.some((n) => n.objectid.toUpperCase() === s)) throw new ZoneError(`not in the graph: ${s}`);
+    out.add(s);
+  }
+  return [...out].sort();
+}
+
+/** Hand-added objects are certified in zone review. */
+function certify(zoneId: string, oids: string[]) {
+  if (oids.length === 0) return;
+  const m = zoneReviews.get(zoneId) ?? new Map<string, ZoneReviewDecision>();
+  for (const o of oids) m.set(o, { status: "certified", by: "admin", at: new Date().toISOString(), note: "added by hand" });
+  zoneReviews.set(zoneId, m);
+}
+
+/** POST /zones/{id}/objects. */
+export function zoneObjects(id: string, change: { add?: string[]; remove?: string[] }): ZoneObjectsResponse {
+  const z = zoneDefs.find((x) => x.id === id);
+  if (!z) throw new ZoneError("zone not found");
+  if (z.builtin) throw new ZoneError("add objects to Tier Zero with Mark Tier Zero");
+  const add = cleanOids(change.add ?? []);
+  const remove = (change.remove ?? []).map((o) => o.trim().toUpperCase());
+  if (add.length === 0 && remove.length === 0) throw new ZoneError("nothing to add or remove");
+  const added = add.filter((o) => !z.objects.includes(o));
+  const removed = remove.filter((o) => z.objects.includes(o) && !add.includes(o));
+  z.objects = [...z.objects.filter((o) => !removed.includes(o)), ...added].sort();
+  certify(id, add);
+  removed.forEach((o) => zoneReviews.get(id)?.delete(o));
+  const still = new Set((zoneSelectorMatches(id) ?? []).map((n) => n.objectid.toUpperCase()));
+  return {
+    zone: { ...z, member_count: zoneMembers(id)!.length },
+    added: added.length,
+    removed: removed.length,
+    still_matched: removed.filter((o) => still.has(o)),
+  };
+}
+
+const validWeight = (w: unknown): w is number => typeof w === "number" && Number.isInteger(w) && w >= 0 && w <= 100;
+
+/** PUT /zones/{id}/weight (Tier Zero included). */
+export function setZoneWeight(id: string, weight: unknown): { id: string; weight: number } {
+  const z = zoneDefs.find((x) => x.id === id);
+  if (!z) throw new ZoneError("zone not found");
+  if (!validWeight(weight)) throw new ZoneError("weight must be 0-100");
+  z.weight = weight;
+  return { id, weight };
 }
 
 export function deleteZone(id: string): void {
@@ -454,6 +520,7 @@ export function simulate(req: SimulateRequest): SimulateResponse | null {
  * many principals lose every path. Pick the best object, repeat.
  */
 export function remediationPlan(req: PlanRequest): PlanResponse | null {
+  if (req.weighted) return weightedPlan(req);
   const zone = zoneTargets(req.zone);
   if (!zone) return null;
   const fixed = new Set(req.fixed_kinds ?? []);
@@ -507,6 +574,92 @@ export function remediationPlan(req: PlanRequest): PlanResponse | null {
     });
   }
   return { baseline, truncated: false, steps, elapsed_ms: 18.4 };
+}
+
+/** Zone members plus everything that joins them through group membership. */
+function expandMembership(zone: Set<NodeId>): Set<NodeId> {
+  const targets = new Set(zone);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const e of edges) {
+      if (e.kind === "MemberOf" && targets.has(e.dst) && !targets.has(e.src)) {
+        targets.add(e.src);
+        grew = true;
+      }
+    }
+  }
+  return targets;
+}
+
+/**
+ * Mock of the cross-zone planner, by brute force: each step severs the object whose onward
+ * edges cut the most weighted exposure (sum over zones of weight × principals cut off).
+ */
+function weightedPlan(req: PlanRequest): PlanResponse | null {
+  const overrides = req.weights ?? {};
+  if (Object.keys(overrides).some((id) => !zoneDefs.some((z) => z.id === id))) throw new ZoneError("unknown zone in weights");
+  if (Object.values(overrides).some((w) => !validWeight(w))) throw new ZoneError("weight must be 0-100");
+  const all = zoneDefs.map((z) => ({ def: z, weight: overrides[z.id] ?? z.weight }));
+  const used = all.filter((z) => z.weight > 0);
+  if (used.length === 0) throw new ZoneError("every zone has weight 0");
+  const protect = req.protect_target_membership ?? true;
+  const zs = used.map((z) => {
+    const members = zoneTargets(z.def.id)!;
+    return { ...z, targets: protect ? expandMembership(members) : members };
+  });
+  const fixed = new Set(req.fixed_kinds ?? []);
+  const removed = new Set<string>();
+  const exposedNow = zs.map((z) => computeExposure(z.targets).exposed.length);
+  const zoneBaselines = [...exposedNow];
+  const baseline = zs.reduce((s, z, i) => s + z.weight * exposedNow[i]!, 0);
+  let left = baseline;
+  const steps: PlanResponse["steps"] = [];
+  const maxSteps = Math.min(50, Math.max(1, req.steps ?? 10));
+  for (let i = 0; i < maxSteps && left > 0; i++) {
+    const cur = zs.map((z) => computeExposure(z.targets, { edges: removed }));
+    const candidates = new Set(cur.flatMap((c) => c.exposed));
+    let best: { id: NodeId; edges: Edge[]; after: number[]; score: number } | null = null;
+    for (const id of candidates) {
+      const own = cur.filter((c, z) => c.exposed.includes(id) && !zs[z]!.targets.has(id));
+      const onward = (outAdj[id] ?? []).filter(
+        (e) => !fixed.has(e.kind) && !removed.has(edgeId(e)) && edgeAllowed(e, {}) && own.some((c) => c.next.has(e.dst)),
+      );
+      if (onward.length === 0) continue;
+      const trial = new Set([...removed, ...onward.map(edgeId)]);
+      const after = zs.map((z) => computeExposure(z.targets, { edges: trial }).exposed.length);
+      const score = zs.reduce((s, z, k) => s + z.weight * (exposedNow[k]! - after[k]!), 0);
+      if (score > 0 && (!best || score > best.score || (score === best.score && onward.length < best.edges.length))) {
+        best = { id, edges: onward, after, score };
+      }
+    }
+    if (!best) break;
+    best.edges.forEach((e) => removed.add(edgeId(e)));
+    const cuts = zs.map((z, k) => ({ id: z.def.id, principals_cut: exposedNow[k]! - best.after[k]!, exposed_after: best.after[k]! }));
+    best.after.forEach((a, k) => (exposedNow[k] = a));
+    left -= best.score;
+    steps.push({
+      node: publicNode(nodes[best.id]!),
+      edges: best.edges.slice(0, 50).map((e) => ({ src: publicNode(nodes[e.src]!), dst: publicNode(nodes[e.dst]!), kind: e.kind })),
+      edge_count: best.edges.length,
+      principals_cut: cuts.reduce((s, c) => s + c.principals_cut, 0),
+      exposed_after: cuts.reduce((s, c) => s + c.exposed_after, 0),
+      score: best.score,
+      score_after: left,
+      zones: cuts,
+      cumulative_reduction_percent: baseline ? Math.round(((baseline - left) / baseline) * 1000) / 10 : 0,
+      needs_window: false,
+    });
+  }
+  return {
+    weighted: true,
+    baseline,
+    truncated: false,
+    zones: zs.map((z, k) => ({ id: z.def.id, name: z.def.name, color: z.def.color, weight: z.weight, baseline: zoneBaselines[k]! })),
+    excluded_zones: all.filter((z) => z.weight === 0).map((z) => z.def.id),
+    steps,
+    elapsed_ms: 24.1,
+  };
 }
 
 // --- posture -------------------------------------------------------------------------

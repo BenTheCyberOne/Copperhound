@@ -414,6 +414,52 @@ async fn v12_findings_simulation_zones_posture() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, v) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"zone": zid, "steps": 2}))).await;
     assert_eq!(s, StatusCode::OK, "{v}");
+
+    // Zone weights and the cross-zone (weighted) plan.
+    let (_, v) = call(&app, get("/api/v1/zones", t)).await;
+    assert!(v.as_array().unwrap().iter().all(|z| z["weight"] == 1), "{v}");
+    let (s, v) = call(&app, json_req("PUT", "/api/v1/zones/tier0/weight", Some(t), json!({"weight": 5}))).await;
+    assert_eq!((s, &v["weight"]), (StatusCode::OK, &json!(5)), "{v}");
+    let (s, _) = call(&app, json_req("PUT", "/api/v1/zones/tier0/weight", Some(t), json!({"weight": 101}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = call(&app, json_req("PUT", "/api/v1/zones/z-nope/weight", Some(t), json!({"weight": 2}))).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, v) = call(&app, get("/api/v1/zones", t)).await;
+    assert_eq!(v[0]["weight"], 5);
+    let (s, v) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"weighted": true, "steps": 4, "weights": {zid.clone(): 2}}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let zones = v["zones"].as_array().unwrap();
+    assert_eq!(zones.iter().map(|z| (z["id"].as_str().unwrap(), z["weight"].as_u64().unwrap())).collect::<Vec<_>>(), vec![("tier0", 5), (zid.as_str(), 2)]);
+    let base: u64 = zones.iter().map(|z| z["weight"].as_u64().unwrap() * z["baseline"].as_u64().unwrap()).sum();
+    assert_eq!(v["baseline"].as_u64(), Some(base));
+    let steps = v["steps"].as_array().unwrap();
+    assert!(!steps.is_empty());
+    let mut left = base;
+    for s in steps {
+        let per = s["zones"].as_array().unwrap();
+        let score: u64 = per.iter().zip(zones).map(|(c, z)| c["principals_cut"].as_u64().unwrap() * z["weight"].as_u64().unwrap()).sum();
+        assert_eq!(s["score"].as_u64(), Some(score), "{s}");
+        left -= score;
+        assert_eq!(s["score_after"].as_u64(), Some(left));
+    }
+    // With the other zone at weight 0, the plan is the Tier Zero plan.
+    let (_, w) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"weighted": true, "steps": 3, "weights": {zid.clone(): 0}}))).await;
+    let (_, p) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"steps": 3}))).await;
+    assert_eq!(w["excluded_zones"], json!([zid]));
+    let ids = |v: &Value| v["steps"].as_array().unwrap().iter().map(|s| (s["node"]["id"].as_u64(), s["principals_cut"].as_u64())).collect::<Vec<_>>();
+    assert_eq!(ids(&w), ids(&p));
+    let (s, _) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"weighted": true, "weights": {"z-nope": 1}}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = call(&app, json_req("POST", "/api/v1/remediation-plan", Some(t), json!({"weighted": true, "weights": {"tier0": 0, zid.clone(): 0}}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // The report has a zone section and the cross-zone plan.
+    let resp = app.clone().oneshot(get("/api/v1/report?format=md&plan_steps=3", t)).await.unwrap();
+    let md = String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(md.contains("\n## Zones\n") && md.contains("| Workstations | 1 | 157 |"), "{md}");
+    assert!(md.contains("### Across all zones, by weight") && md.contains("Weights: Tier Zero ×5, Workstations ×1."), "{md}");
+    let (s, _) = call(&app, json_req("PUT", "/api/v1/zones/tier0/weight", Some(t), json!({"weight": 1}))).await;
+    assert_eq!(s, StatusCode::OK);
+
     let (_, v) = call(&app, get(&format!("/api/v1/zones/{zid}/members?limit=1"), t)).await;
     let ws_id = v["items"][0]["id"].as_u64().unwrap();
     let (_, v) = call(&app, json_req("POST", "/api/v1/zones/membership", Some(t), json!({"ids": [ws_id]}))).await;
@@ -438,6 +484,36 @@ async fn v12_findings_simulation_zones_posture() {
     assert_eq!(v["total"], 156, "revoked object left the zone");
     let (_, v) = call(&app, get("/api/v1/zones", t)).await;
     assert_eq!(v.as_array().unwrap().iter().find(|z| z["id"] == json!(zid)).unwrap()["member_count"], 156);
+
+    // Objects added by hand: a zone without a selector, and re-adding a revoked object.
+    let rev = oids[2].to_uppercase();
+    let (s, v) = call(&app, json_req("POST", "/api/v1/zones", Some(t), json!({"name": "Hand-picked", "selector": "", "objects": [oids[0].clone()]}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let hid = v["id"].as_str().unwrap().to_string();
+    assert_eq!((v["member_count"].as_u64(), v["objects"].clone()), (Some(1), json!([oids[0].to_uppercase()])));
+    let (_, v) = call(&app, get(&format!("/api/v1/zones/{hid}/review"), t)).await;
+    assert_eq!((v["counts"]["certified"].as_u64(), v["items"][0]["decision"]["note"].as_str()), (Some(1), Some("added by hand")));
+    let (s, v) = call(&app, json_req("POST", &format!("/api/v1/zones/{hid}/objects"), Some(t), json!({"add": [oids[1].clone(), "S-1-5-21-NOPE"]}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("S-1-5-21-NOPE"));
+    let (s, v) = call(&app, json_req("POST", &format!("/api/v1/zones/{hid}/objects"), Some(t), json!({"add": [oids[1].clone(), oids[1].to_lowercase()]}))).await;
+    assert_eq!((s, v["added"].as_u64(), v["zone"]["member_count"].as_u64()), (StatusCode::OK, Some(1), Some(2)), "{v}");
+    let (s, _) = call(&app, json_req("POST", "/api/v1/zones/tier0/objects", Some(t), json!({"add": [oids[1].clone()]}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = call(&app, json_req("POST", &format!("/api/v1/zones/{hid}/objects"), Some(t), json!({"remove": [oids[0].clone()]}))).await;
+    assert_eq!((s, v["removed"].as_u64(), v["zone"]["member_count"].as_u64(), v["still_matched"].clone()), (StatusCode::OK, Some(1), Some(1), json!([])), "{v}");
+    // The revoked workstation, added by hand, is certified and back in the zone.
+    let (_, v) = call(&app, json_req("POST", &format!("/api/v1/zones/{zid}/objects"), Some(t), json!({"add": [rev.clone()]}))).await;
+    assert_eq!(v["zone"]["member_count"], 157, "{v}");
+    let (_, v) = call(&app, get(&format!("/api/v1/zones/{zid}/review?status=revoked"), t)).await;
+    assert_eq!(v["counts"]["revoked"], 0);
+    // Removing it again: the selector still matches it, so it stays (pending).
+    let (_, v) = call(&app, json_req("POST", &format!("/api/v1/zones/{zid}/objects"), Some(t), json!({"remove": [rev.clone()]}))).await;
+    assert_eq!((v["zone"]["member_count"].as_u64(), v["still_matched"].clone()), (Some(157), json!([rev])), "{v}");
+    let (s, _) = call(&app, json_req("POST", &format!("/api/v1/zones/{zid}/review"), Some(t), json!({"objectids": [oids[2].clone()], "status": "revoked"}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = call(&app, Request::builder().method("DELETE").uri(format!("/api/v1/zones/{hid}")).header(header::AUTHORIZATION, format!("Bearer {t}")).body(Body::empty()).unwrap()).await;
+    assert_eq!(s, StatusCode::OK);
     // Back to pending restores membership.
     let (_, _) = call(&app, json_req("POST", &format!("/api/v1/zones/{zid}/review"), Some(t), json!({"objectids": [oids[2].clone()], "status": "pending"}))).await;
     let (_, v) = call(&app, get(&format!("/api/v1/zones/{zid}/members?limit=1"), t)).await;

@@ -3,6 +3,7 @@
 //! zone (`revoked`). Revoked objects are left out of the zone's membership,
 //! and so of its exposure and path analysis, while the selector still
 //! matches them; objects the selector picks up later start as pending.
+//! Objects added to a zone by hand are certified when added.
 //! Built-in Tier Zero is managed with marks instead.
 //!
 //! Stored in `<data>/zone_reviews.json`: zone id → object id → decision.
@@ -45,6 +46,27 @@ pub fn revoked(st: &AppState, zone: &str) -> ahash::AHashSet<String> {
         .get(zone)
         .map(|m| m.iter().filter(|(_, d)| d.status == "revoked").map(|(k, _)| k.to_ascii_uppercase()).collect())
         .unwrap_or_default()
+}
+
+/// Set (`Some(status)`) or clear (`None`) the decision on `oids` in `zone`.
+pub(crate) fn set_status(st: &AppState, zone: &str, oids: &[String], status: Option<&str>, by: &str, note: &str) -> anyhow::Result<()> {
+    let _g = LOCK.lock();
+    let mut all = load(st);
+    let z = all.entry(zone.to_string()).or_default();
+    for oid in oids {
+        let key = oid.trim().to_ascii_uppercase();
+        match status {
+            None => {
+                z.remove(&key);
+            }
+            Some(s) => {
+                z.insert(key, Decision { status: s.to_string(), by: by.to_string(), at: now_rfc3339(), note: note.trim().to_string() });
+            }
+        }
+    }
+    all.retain(|_, m| !m.is_empty());
+    store_json(&path(st), &all)?;
+    Ok(())
 }
 
 /// Drop a deleted zone's decisions.
@@ -121,22 +143,9 @@ pub async fn post_review(State(st): St, Extension(who): Extension<Principal>, Pa
     if r.objectids.is_empty() || r.objectids.len() > 10_000 || r.note.len() > 1000 {
         return Err(ApiError::bad("1-10000 objectids and a note of at most 1000 characters"));
     }
-    let n = {
-        let _g = LOCK.lock();
-        let mut all = load(&st);
-        let zone = all.entry(id.clone()).or_default();
-        for oid in &r.objectids {
-            let key = oid.trim().to_ascii_uppercase();
-            if r.status == "pending" {
-                zone.remove(&key);
-            } else {
-                zone.insert(key, Decision { status: r.status.clone(), by: who.username.clone(), at: now_rfc3339(), note: r.note.trim().to_string() });
-            }
-        }
-        all.retain(|_, m| !m.is_empty());
-        store_json(&path(&st), &all)?;
-        r.objectids.len()
-    };
+    let status = (r.status != "pending").then_some(r.status.as_str());
+    set_status(&st, &id, &r.objectids, status, &who.username, &r.note)?;
+    let n = r.objectids.len();
     // Membership changed (the request itself is audited by the middleware).
     st.zone_cache.lock().retain(|(_, zid), _| *zid != id);
     Ok(Json(json!({"zone": id, "updated": n, "status": r.status})))

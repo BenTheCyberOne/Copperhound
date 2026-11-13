@@ -2,6 +2,7 @@ import type { Node } from "../api/types";
 import { useApp } from "../state/AppContext";
 import { useFixList } from "../state/FixListContext";
 import { useSession } from "../state/SessionContext";
+import { useZones } from "../state/ZonesContext";
 
 export interface NodeAction {
   id: string;
@@ -19,6 +20,7 @@ export function useNodeActions(node: Node | null, opts: { includeRemove: boolean
   const { expand, setMarks, setPathFrom, setPathTo, setTab, store, select, selectedId, notify } = useApp();
   const fixList = useFixList();
   const { gate } = useSession();
+  const { openAddToZone } = useZones();
   if (!node) return [];
   const markGate = gate("analyst");
   const inSimulation = fixList.list.nodes.some((n) => n.objectid === node.objectid);
@@ -55,6 +57,7 @@ export function useNodeActions(node: Node | null, opts: { includeRemove: boolean
       run: () => void setMarks(node.id, { tier0: !node.tier0 }),
       ...markGate,
     },
+    { id: "zone", label: "Add to zone…", run: () => openAddToZone([node]), ...markGate },
   ];
   actions.push({
     id: "simulate",

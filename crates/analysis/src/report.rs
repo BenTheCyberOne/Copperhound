@@ -4,7 +4,7 @@
 
 use crate::findings::{FindingResult, Items, Severity};
 use crate::posture::Snapshot;
-use crate::simulate::Plan;
+use crate::simulate::{exposure_with, plan_weighted, Plan, PlanOptions, WeightedPlan, WeightedZone};
 use crate::{edge_label, EdgeKey};
 use ch_engine::Tier0Report;
 use ch_store::Graph;
@@ -24,6 +24,63 @@ pub struct ReportInput<'a> {
     pub items_per_finding: usize,
     /// Findings accepted as risks (left out of `findings`).
     pub accepted: &'a [AcceptedRisk],
+    /// Exposure per zone (Tier Zero first); the section appears with two or more.
+    pub zones: &'a [ZoneReport],
+    /// Remediation plan across every zone by weight.
+    pub cross_zone_plan: Option<&'a CrossZonePlan>,
+}
+
+/// One zone in the report.
+#[derive(Debug, Clone)]
+pub struct ZoneReport {
+    pub name: String,
+    pub weight: u32,
+    pub members: u64,
+    pub exposure: Tier0Report,
+}
+
+/// A weighted plan with the names and weights of its zones (plan order).
+#[derive(Debug, Clone)]
+pub struct CrossZonePlan {
+    pub zones: Vec<(String, u32)>,
+    pub plan: WeightedPlan,
+}
+
+/// The zone section and cross-zone plan for `zones` (`(name, weight, members)`,
+/// Tier Zero first). The plan is computed when `plan` is given and two or more
+/// zones have a weight above 0.
+pub fn zone_sections(
+    g: &Graph,
+    zones: &[(String, u32, Vec<u32>)],
+    plan: Option<&PlanOptions>,
+    cancel: &ch_query::Cancel,
+) -> (Vec<ZoneReport>, Option<CrossZonePlan>) {
+    let reports = zones
+        .iter()
+        .map(|(name, weight, m)| ZoneReport {
+            name: name.clone(),
+            weight: *weight,
+            members: m.len() as u64,
+            exposure: exposure_with(g, m, &crate::Removal::default(), 0),
+        })
+        .collect();
+    let used: Vec<&(String, u32, Vec<u32>)> = zones.iter().filter(|z| z.1 > 0).collect();
+    let cross = plan.filter(|o| o.steps > 0 && used.len() >= 2).map(|o| {
+        let wz: Vec<WeightedZone> = used.iter().map(|z| WeightedZone { weight: z.1, targets: &z.2 }).collect();
+        CrossZonePlan { zones: used.iter().map(|z| (z.0.clone(), z.1)).collect(), plan: plan_weighted(g, &wz, o, cancel) }
+    });
+    (reports, cross)
+}
+
+/// "Tier Zero −28, Finance −3" for a cross-zone step.
+fn per_zone(c: &CrossZonePlan, s: &crate::simulate::WeightedStep) -> String {
+    c.zones
+        .iter()
+        .zip(&s.zones)
+        .filter(|(_, z)| z.principals_cut > 0)
+        .map(|((n, _), z)| format!("{n} −{}", num(z.principals_cut)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A finding accepted as a risk, listed separately in the report.
@@ -284,6 +341,16 @@ pub fn render_html(r: &ReportInput) -> String {
             num(last.exposed_after)
         );
     }
+    if let Some(c) = r.cross_zone_plan.filter(|c| !c.plan.steps.is_empty()) {
+        let last = c.plan.steps.last().expect("non-empty");
+        let _ = write!(
+            h,
+            "<p><b>Across all {} weighted zones</b>, the {} fixes of the cross-zone plan cut weighted exposure by {:.1}%.</p>",
+            c.zones.len(),
+            c.plan.steps.len(),
+            last.cumulative_reduction_percent
+        );
+    }
 
     // Findings overview
     h.push_str("<h2>1. Findings</h2>");
@@ -386,10 +453,62 @@ pub fn render_html(r: &ReportInput) -> String {
         }
         _ => h.push_str("<p>No remediation steps: nothing is exposed, or the plan was not computed.</p>"),
     }
+    if let Some(c) = r.cross_zone_plan {
+        h.push_str("<h3>Across all zones, by weight</h3>");
+        let weights: Vec<String> = c.zones.iter().map(|(n, w)| format!("{} ×{w}", esc(n))).collect();
+        let _ = write!(
+            h,
+            "<p class=\"muted\">Each step cuts the most weighted exposure: weight × principals cut off each zone, summed ({}). A principal exposed to two zones counts in both.</p>",
+            weights.join(", ")
+        );
+        if c.plan.steps.is_empty() {
+            h.push_str("<p>No remediation steps.</p>");
+        } else {
+            h.push_str("<table><thead><tr><th>#</th><th>Sever</th><th>Cuts per zone</th><th class=\"n\">Weighted cut</th><th class=\"n\">Total cut</th></tr></thead><tbody>");
+            for (i, s) in c.plan.steps.iter().enumerate() {
+                let _ = write!(
+                    h,
+                    "<tr><td>{}</td><td>{} <span class=\"muted\">({}){}</span></td><td>{}</td><td class=\"n\">{}</td><td class=\"n\">{:.1}%</td></tr>",
+                    i + 1,
+                    esc(g.name(s.node)),
+                    esc(g.kind_name(s.node)),
+                    if s.needs_window { " · maintenance window" } else { "" },
+                    esc(&per_zone(c, s)),
+                    num(s.score),
+                    s.cumulative_reduction_percent
+                );
+            }
+            h.push_str("</tbody></table>");
+        }
+    }
+
+    let mut sec = 3;
+    if r.zones.len() > 1 {
+        sec += 1;
+        let _ = write!(h, "<h2>{sec}. Zones</h2><p class=\"muted\">Principals with an attack path into each privilege zone.</p>");
+        let bars: Vec<(String, f64)> =
+            r.zones.iter().map(|z| (z.name.clone(), pct(z.exposure.exposed_principals, z.exposure.total_principals))).collect();
+        h.push_str(&bar_chart(&bars, "%"));
+        h.push_str("<table><thead><tr><th>Zone</th><th class=\"n\">Weight</th><th class=\"n\">Members</th><th class=\"n\">Exposed principals</th><th class=\"n\">Exposure</th><th class=\"n\">Longest path</th></tr></thead><tbody>");
+        for z in r.zones {
+            let _ = write!(
+                h,
+                "<tr><td>{}</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{:.1}%</td><td class=\"n\">{}</td></tr>",
+                esc(&z.name),
+                z.weight,
+                num(z.members),
+                num(z.exposure.exposed_principals),
+                pct(z.exposure.exposed_principals, z.exposure.total_principals),
+                z.exposure.max_depth
+            );
+        }
+        h.push_str("</tbody></table>");
+    }
 
     // Choke points
     if !r.tier0.choke_points.is_empty() {
-        h.push_str("<h2>4. Choke points</h2><p class=\"muted\">Relationships carrying the most shortest attack paths into Tier Zero.</p>");
+        sec += 1;
+        let _ = write!(h, "<h2>{sec}. Choke points</h2><p class=\"muted\">Relationships carrying the most shortest attack paths into Tier Zero.</p>");
         h.push_str("<table><thead><tr><th>From</th><th>Relationship</th><th>To</th><th class=\"n\">Paths routed</th></tr></thead><tbody>");
         for c in &r.tier0.choke_points {
             let _ = write!(
@@ -405,7 +524,7 @@ pub fn render_html(r: &ReportInput) -> String {
     }
 
     // Details
-    h.push_str("<h2>5. Finding details</h2>");
+    let _ = write!(h, "<h2>{}. Finding details</h2>", sec + 1);
     for f in r.findings {
         let s = sev_str(f.def.severity);
         let _ = write!(h, "<div class=\"finding\" id=\"f-{}\"><h3><span class=\"sev {s}\">{s}</span> {}</h3>", esc(f.def.id), esc(f.def.title));
@@ -461,6 +580,10 @@ pub fn render_markdown(r: &ReportInput) -> String {
         let last = p.steps.last().expect("non-empty");
         let _ = writeln!(m, "- The {}-step remediation plan cuts exposure by {:.1}%", p.steps.len(), last.cumulative_reduction_percent);
     }
+    if let Some(c) = r.cross_zone_plan.filter(|c| !c.plan.steps.is_empty()) {
+        let last = c.plan.steps.last().expect("non-empty");
+        let _ = writeln!(m, "- Across all {} weighted zones, the {}-step cross-zone plan cuts weighted exposure by {:.1}%", c.zones.len(), c.plan.steps.len(), last.cumulative_reduction_percent);
+    }
     let _ = writeln!(m, "\n## Findings\n\n| Severity | Finding | Category | Items | Fix removes |\n|---|---|---|---:|---:|");
     for f in r.findings {
         let impact = f
@@ -475,6 +598,37 @@ pub fn render_markdown(r: &ReportInput) -> String {
         for (i, s) in p.steps.iter().enumerate() {
             let window = if s.needs_window { ", maintenance window" } else { "" };
             let _ = writeln!(m, "| {} | {} ({}{window}) | {} | {:.1}% |", i + 1, md_cell(g.name(s.node)), md_cell(g.kind_name(s.node)), num(s.principals_cut), s.cumulative_reduction_percent);
+        }
+    }
+    if let Some(c) = r.cross_zone_plan.filter(|c| !c.plan.steps.is_empty()) {
+        let weights: Vec<String> = c.zones.iter().map(|(n, w)| format!("{} ×{w}", md_cell(n))).collect();
+        let _ = writeln!(m, "\n### Across all zones, by weight\n\nWeights: {}.\n\n| # | Sever | Cuts per zone | Weighted cut | Total cut |\n|---:|---|---|---:|---:|", weights.join(", "));
+        for (i, s) in c.plan.steps.iter().enumerate() {
+            let window = if s.needs_window { ", maintenance window" } else { "" };
+            let _ = writeln!(
+                m,
+                "| {} | {} ({}{window}) | {} | {} | {:.1}% |",
+                i + 1,
+                md_cell(g.name(s.node)),
+                md_cell(g.kind_name(s.node)),
+                md_cell(&per_zone(c, s)),
+                num(s.score),
+                s.cumulative_reduction_percent
+            );
+        }
+    }
+    if r.zones.len() > 1 {
+        let _ = writeln!(m, "\n## Zones\n\n| Zone | Weight | Members | Exposed principals | Exposure |\n|---|---:|---:|---:|---:|");
+        for z in r.zones {
+            let _ = writeln!(
+                m,
+                "| {} | {} | {} | {} | {:.1}% |",
+                md_cell(&z.name),
+                z.weight,
+                num(z.members),
+                num(z.exposure.exposed_principals),
+                pct(z.exposure.exposed_principals, z.exposure.total_principals)
+            );
         }
     }
     if !r.accepted.is_empty() {

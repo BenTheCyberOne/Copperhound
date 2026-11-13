@@ -103,6 +103,8 @@ fn analysis(g: &Graph) -> String {
         plan: Some(&plan),
         items_per_finding: 50,
         accepted: &[],
+        zones: &[],
+        cross_zone_plan: None,
     };
     out += &report::render_markdown(&input);
     out += &report::render_csv(&input);

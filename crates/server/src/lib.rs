@@ -96,6 +96,8 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/zones", get(analysis::list_zones).post(analysis::create_zone))
         .route("/zones/{id}", axum::routing::put(analysis::update_zone).delete(analysis::delete_zone))
         .route("/zones/{id}/members", get(analysis::zone_members_api))
+        .route("/zones/{id}/weight", axum::routing::put(analysis::set_zone_weight))
+        .route("/zones/{id}/objects", post(analysis::zone_objects))
         .route("/zones/{id}/review", get(zonereview::get_review).post(zonereview::post_review))
         .route("/zones/{id}/exposure", get(analysis::zone_exposure))
         .route("/network", get(network::get_network).put(network::put_network).delete(network::delete_network))

@@ -150,6 +150,9 @@ pub struct AppState {
     /// Background analysis (findings, posture) for the current generation.
     pub analysis: RwLock<Analysis>,
     pub zones: Mutex<Vec<ZoneDef>>,
+    /// Zone weights for cross-zone remediation plans, by zone id (Tier Zero
+    /// included); zones not listed weigh 1.
+    pub zone_weights: Mutex<std::collections::BTreeMap<String, u32>>,
     /// Zone members per (generation, zone id).
     pub zone_cache: Mutex<ZoneCache>,
     /// Notification channels, report schedules and alert rules.
@@ -177,8 +180,12 @@ pub struct ZoneDef {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// CHQL selector; may be empty when members are added by hand.
     pub selector: String,
     pub color: String,
+    /// Object ids added by hand (upper case), members whatever the selector says.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<String>,
 }
 
 pub fn load_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
@@ -237,6 +244,9 @@ impl AppState {
     pub fn zones_path(&self) -> PathBuf {
         self.data_dir.join("zones.json")
     }
+    pub fn zone_weights_path(&self) -> PathBuf {
+        self.data_dir.join("zone_weights.json")
+    }
     pub fn posture_path(&self) -> PathBuf {
         self.data_dir.join("posture.json")
     }
@@ -285,6 +295,7 @@ impl AppState {
             saved: Mutex::new(saved),
             analysis: RwLock::new(Analysis::Idle),
             zones: Mutex::new(load_json(&data_dir_zones)),
+            zone_weights: Mutex::new(load_json(&data_dir_zones.with_file_name("zone_weights.json"))),
             zone_cache: Mutex::new(AHashMap::new()),
             notify: crate::notify::NotifyState::load(&data_dir_notify),
         });

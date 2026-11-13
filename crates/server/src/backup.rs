@@ -39,6 +39,7 @@ const ROOT_FILES: &[&str] = &[
     "alert_rules.json",
     "schedules.json",
     "zones.json",
+    "zone_weights.json",
     "saved_queries.json",
     "marks.json",
     "accepted_risks.json",

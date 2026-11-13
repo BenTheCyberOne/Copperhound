@@ -7,10 +7,13 @@ interface Props {
   max: number;
   step?: number;
   onCommit: (value: number) => void;
+  disabled?: boolean;
+  title?: string;
+  "aria-label"?: string;
 }
 
 /** Number input that lets you type freely and clamps on blur / Enter. */
-export function NumberField({ id, value, min, max, step, onCommit }: Props) {
+export function NumberField({ id, value, min, max, step, onCommit, disabled, title, "aria-label": ariaLabel }: Props) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
   const commit = () => {
@@ -26,6 +29,9 @@ export function NumberField({ id, value, min, max, step, onCommit }: Props) {
       min={min}
       max={max}
       step={step}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}

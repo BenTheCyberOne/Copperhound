@@ -234,6 +234,8 @@ Minimum role per endpoint (see [Roles](#roles)). "public" = no authentication.
 | GET | `/findings/accepted` | viewer | [Risk acceptance](#risk-acceptance) |
 | GET, POST | `/zones` | viewer, analyst | [Zones](#zones-privilege-zones) |
 | PUT, DELETE | `/zones/{id}` | analyst | [Zones](#zones-privilege-zones) |
+| PUT | `/zones/{id}/weight` | analyst | [Zones](#zones-privilege-zones) |
+| POST | `/zones/{id}/objects` | analyst | [Zones](#zones-privilege-zones) |
 | GET | `/zones/{id}/members`, `/zones/{id}/exposure` | viewer | [Zones](#zones-privilege-zones) |
 | POST | `/zones/membership` | viewer | [Zones](#zones-privilege-zones) |
 | GET, POST | `/zones/{id}/review` | viewer, analyst | [Zone review](#zone-review) |
@@ -693,14 +695,21 @@ A zone is a set of target objects. The built-in zone `tier0` holds objects flagg
 edited or deleted. A custom zone's members are the node results of its CHQL **selector**.
 
 - `GET /zones` → `[Zone]`
-- `POST /zones` `{name, description?, selector, color?}` → Zone (selector parsed and run; `400` with `position`/`code` on error)
-- `PUT /zones/{id}` same body → Zone
+- `POST /zones` `{name, description?, selector, color?, weight?, objects?}` → Zone (selector parsed and run; `400` with `position`/`code` on error).
+  `selector` may be empty; `objects` (object ids) are added by hand and certified in [zone review](#zone-review)
+- `PUT /zones/{id}` same body → Zone (`weight` unchanged if absent; `objects`, if given, replaces the hand-added set)
+- `POST /zones/{id}/objects` (analyst) `{"add": [objectid], "remove": [objectid]}` → `{"zone": Zone, "added", "removed",
+  "still_matched": [objectid]}`. Members are the selector's matches plus the objects added by hand (up to 10 000; they
+  must be in the graph). Added objects are certified (a revoked one comes back); removing one clears its decision, so
+  if the selector still matches it, it stays as pending (`still_matched`). Not for `tier0` (use marks).
+- `PUT /zones/{id}/weight` `{"weight": 5}` → `{"id","weight"}`: the zone's weight in
+  [cross-zone plans](#cross-zone-weighted-plans), 0-100 (default 1; 0 leaves the zone out). Works for `tier0` too.
 - `DELETE /zones/{id}` → `{}`
 - `GET /zones/{id}/members?offset=0&limit=200` → `{"total": n, "items": [Node]}` (`limit` ≤ 20000)
 - `GET /zones/{id}/exposure?top=25` → Tier0Report shape (see [`/tier0`](#tier-zero-exposure-and-choke-points)) for that zone
 - `POST /zones/membership` `{"ids": [1, 2]}` → `{"1": ["tier0", "z-ab12"]}` (max 20000 ids; nodes in no zone omitted)
 
-`Zone = {"id","name","description","selector","color","builtin": bool,"member_count": n}`. `color` is a CSS
+`Zone = {"id","name","description","selector","color","builtin": bool,"member_count": n,"weight": n,"objects": [objectid]}`. `color` is a CSS
 hex string (default chosen by server).
 
 Zones are also targets for [`/path`](#shortest-paths) (`to_zone`), [`/simulate`](#what-if-simulation) and the
@@ -757,6 +766,29 @@ first ([OT.md](OT.md#fix-cost)). Response:
 ```
 `edges` is capped at 50 per step (`edge_count` gives the full number). Runs synchronously; may take seconds
 on very large graphs (honours `timeout_ms`, default 120000).
+
+#### Cross-zone (weighted) plans
+
+With `"weighted": true` (`zone` is ignored) the planner works on every zone at once. Each zone counts with
+its weight (`PUT /zones/{id}/weight`; `weights` in the request overrides them for this plan only, e.g.
+`{"weighted": true, "weights": {"tier0": 10, "z-ab12": 3}}`). Each step severs the choke object with the
+largest **weighted cut**: the sum over zones of weight × principals it alone cuts off from that zone, exact
+with one dominator tree per zone. A principal exposed to two zones counts in both. Zones of weight 0 are
+left out. Other options work as above. Response:
+```json
+{"weighted": true, "baseline": n, "truncated": false, "elapsed_ms": n,
+ "zones": [{"id": "tier0", "name": "Tier Zero", "color": "#e5484d", "weight": 10, "baseline": n}],
+ "excluded_zones": ["z-cd34"],
+ "steps": [{"node": Node, "edges": [...], "edge_count": n, "score": n, "score_after": n,
+            "principals_cut": n, "exposed_after": n, "cumulative_reduction_percent": p, "needs_window": false,
+            "zones": [{"id": "tier0", "principals_cut": n, "exposed_after": n}]}]}
+```
+`baseline` and `score_after` are weighted exposure (sum of weight × exposed principals);
+`cumulative_reduction_percent` is relative to it. `principals_cut` / `exposed_after` are summed over zones
+without weights. `400` if `weights` names an unknown zone or every zone has weight 0.
+
+CLI: `copperhound plan corp.chg --tier0-weight 10 --zone "Finance=3:MATCH (c:Computer) WHERE c.name STARTS WITH 'FIN' RETURN c"`
+(`--zone NAME=WEIGHT:SELECTOR`, repeatable).
 
 ### Remediation hand-off (commands and tickets)
 
@@ -827,11 +859,12 @@ secrets); the alert history is readable by **analysts**. Changes are [audited](#
 
 `GET /report?format=html|md|csv&title=&plan_steps=10&items=25&download=1[&env=<id>]` — a self-contained
 assessment report for the current snapshot: posture grade, exposure, findings with measured impact, posture
-trend, remediation plan, choke points and per-finding details. HTML has inline CSS/SVG and print styles
+trend, remediation plan, choke points and per-finding details. With custom zones, it adds exposure per zone and
+a [cross-zone plan](#cross-zone-weighted-plans) by zone weight (HTML and Markdown). HTML has inline CSS/SVG and print styles
 (print → PDF); CSV has one row per finding item. `202` while analysis is computing. See also
 [Risk acceptance](#risk-acceptance) and [`env`](#environments-scope-by-domain--tenant).
 
-CLI: `copperhound report <graph> -o report.html|.md|.csv`.
+CLI: `copperhound report <graph> -o report.html|.md|.csv` (`--zone NAME=WEIGHT:SELECTOR` and `--tier0-weight` add zones).
 
 ### Notification channels (admin)
 

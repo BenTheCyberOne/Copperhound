@@ -3,13 +3,15 @@
 
 use crate::api::{node_json, ApiError, St};
 use crate::state::{now_rfc3339, store_json, load_json, Analysis, AnalysisResult, AppState, ZoneDef};
+use crate::auth::Principal;
 use axum::extract::{Path, Query, State};
+use axum::Extension;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ch_analysis::findings::{baseline, evaluate_one, sort_results, FindingResult, Items, CATALOG};
 use ch_analysis::posture::{diff, snapshot_items, Snapshot, SnapshotItems};
-use ch_analysis::simulate::{exposure_with, fix_costs, plan, simulate, PlanOptions};
+use ch_analysis::simulate::{exposure_with, fix_costs, plan, plan_weighted, simulate, PlanOptions, WeightedZone};
 use ch_analysis::Removal;
 use ch_model::flags;
 use ch_store::Graph;
@@ -307,27 +309,95 @@ pub(crate) fn zone_members(st: &AppState, g: &Graph, generation: u64, zone: &str
     Ok(m)
 }
 
-/// Everything a custom zone's selector matches, sorted, before zone review.
+/// Everything a custom zone's selector matches plus the objects added by
+/// hand that are in the graph, sorted, before zone review.
 pub(crate) fn zone_selector_matches(st: &AppState, g: &Graph, zone: &str) -> Result<Vec<u32>, ApiError> {
     let def = st.zones.lock().iter().find(|z| z.id == zone).cloned().ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("no zone '{zone}'")))?;
-    let r = ch_query::run_capped(g, &def.selector, usize::MAX, 50_000_000, &ch_query::Cancel::never()).map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, format!("zone selector: {e}")))?;
-    let mut nodes = r.nodes;
+    let mut nodes = if def.selector.trim().is_empty() {
+        Vec::new()
+    } else {
+        ch_query::run_capped(g, &def.selector, usize::MAX, 50_000_000, &ch_query::Cancel::never())
+            .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, format!("zone selector: {e}")))?
+            .nodes
+    };
+    nodes.extend(def.objects.iter().filter_map(|o| node_by_oid(g, o)));
     nodes.sort_unstable();
     nodes.dedup();
     Ok(nodes)
 }
 
+/// The node with exactly this object id (case-insensitive), not a name match.
+fn node_by_oid(g: &Graph, oid: &str) -> Option<u32> {
+    g.lookup(oid).filter(|&n| g.oid(n).eq_ignore_ascii_case(oid.trim()))
+}
+
+/// Most objects a zone can hold by hand.
+const MAX_ZONE_OBJECTS: usize = 10_000;
+
+/// Trimmed, upper-cased, deduplicated object ids; `400` on empty or overlong ones.
+fn clean_oids(oids: &[String]) -> Result<Vec<String>, ApiError> {
+    let mut out: Vec<String> = Vec::with_capacity(oids.len());
+    for o in oids {
+        let o = o.trim();
+        if o.is_empty() || o.len() > 256 {
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "object ids must be 1-256 characters"));
+        }
+        out.push(o.to_ascii_uppercase());
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// `400` if any of `oids` is not in the loaded graph (no check without one).
+fn check_known(st: &AppState, oids: &[String]) -> Result<(), ApiError> {
+    let guard = st.graph.read_recursive();
+    let Some(l) = guard.as_ref() else { return Ok(()) };
+    let unknown: Vec<&str> = oids.iter().filter(|o| node_by_oid(&l.graph, o).is_none()).map(String::as_str).take(5).collect();
+    if unknown.is_empty() {
+        Ok(())
+    } else {
+        Err(ApiError::new(StatusCode::BAD_REQUEST, format!("not in the graph: {}", unknown.join(", "))))
+    }
+}
+
+/// Largest zone weight.
+pub(crate) const MAX_ZONE_WEIGHT: u32 = 100;
+
+/// A zone's weight in cross-zone remediation plans (default 1).
+pub(crate) fn zone_weight(st: &AppState, id: &str) -> u32 {
+    st.zone_weights.lock().get(id).copied().unwrap_or(1)
+}
+
+fn check_weight(w: u32) -> Result<u32, ApiError> {
+    if w > MAX_ZONE_WEIGHT {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, format!("weight must be 0-{MAX_ZONE_WEIGHT}")));
+    }
+    Ok(w)
+}
+
+/// Store a zone's weight (1 is the default and is not stored).
+fn store_weight(st: &AppState, id: &str, w: Option<u32>) -> Result<(), ApiError> {
+    let mut m = st.zone_weights.lock();
+    match w {
+        Some(1) | None => m.remove(id),
+        Some(w) => m.insert(id.to_string(), w),
+    };
+    store_json(&st.zone_weights_path(), &*m)?;
+    Ok(())
+}
+
 fn zone_json(st: &AppState, z: Option<&ZoneDef>) -> Value {
     let guard = st.graph.read_recursive();
-    let count = guard.as_ref().and_then(|l| {
-        let id = z.map(|z| z.id.as_str()).unwrap_or(TIER0_ZONE);
-        zone_members(st, &l.graph, l.generation, id).ok().map(|m| m.len())
-    });
+    let id = z.map(|z| z.id.as_str()).unwrap_or(TIER0_ZONE);
+    let count = guard.as_ref().and_then(|l| zone_members(st, &l.graph, l.generation, id).ok().map(|m| m.len()));
+    let weight = zone_weight(st, id);
     match z {
         None => json!({"id": TIER0_ZONE, "name": "Tier Zero", "description": "Objects tagged Tier Zero by ingest rules and operator marks.",
-                       "selector": "MATCH (t {tier0:true}) RETURN t", "color": "#e5484d", "builtin": true, "member_count": count.unwrap_or(0)}),
+                       "selector": "MATCH (t {tier0:true}) RETURN t", "color": "#e5484d", "builtin": true, "member_count": count.unwrap_or(0),
+                       "weight": weight, "objects": []}),
         Some(z) => json!({"id": z.id, "name": z.name, "description": z.description, "selector": z.selector, "color": z.color,
-                          "builtin": false, "member_count": count.unwrap_or(0)}),
+                          "builtin": false, "member_count": count.unwrap_or(0), "weight": weight, "objects": z.objects}),
     }
 }
 
@@ -348,11 +418,21 @@ pub async fn list_zones(State(st): St) -> Json<Value> {
 pub struct ZoneReq {
     name: String,
     description: Option<String>,
+    /// May be empty when the zone has objects added by hand.
+    #[serde(default)]
     selector: String,
     color: Option<String>,
+    /// Weight in cross-zone remediation plans (0-100; unchanged if absent).
+    weight: Option<u32>,
+    /// Objects added by hand: on create, the initial set (certified); on
+    /// update, replaces the set (unchanged if absent).
+    objects: Option<Vec<String>>,
 }
 
 fn validate_zone(r: &ZoneReq) -> Result<(), ApiError> {
+    if let Some(w) = r.weight {
+        check_weight(w)?;
+    }
     if r.name.trim().is_empty() || r.name.len() > 100 {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "name must be 1-100 characters"));
     }
@@ -362,26 +442,41 @@ fn validate_zone(r: &ZoneReq) -> Result<(), ApiError> {
             return Err(ApiError::new(StatusCode::BAD_REQUEST, "color must be #rrggbb"));
         }
     }
+    if r.objects.as_ref().is_some_and(|o| o.len() > MAX_ZONE_OBJECTS) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, format!("at most {MAX_ZONE_OBJECTS} objects added by hand")));
+    }
+    if r.selector.trim().is_empty() {
+        return Ok(());
+    }
     ch_query::parse_syntax(&r.selector).map(|_| ()).map_err(|e| {
         crate::api::ApiError::raw(StatusCode::BAD_REQUEST, json!({"error": e.message, "position": e.position, "code": e.code}))
     })
 }
 
-pub async fn create_zone(State(st): St, Json(r): Json<ZoneReq>) -> Result<Json<Value>, ApiError> {
+pub async fn create_zone(State(st): St, Extension(who): Extension<Principal>, Json(r): Json<ZoneReq>) -> Result<Json<Value>, ApiError> {
     validate_zone(&r)?;
+    let objects = clean_oids(r.objects.as_deref().unwrap_or_default())?;
+    check_known(&st, &objects)?;
     let z = {
         let mut zones = st.zones.lock();
         let z = ZoneDef {
             id: format!("z-{}", crate::auth::random_hex(6)),
             name: r.name.trim().to_string(),
             description: r.description.unwrap_or_default(),
-            selector: r.selector,
+            selector: r.selector.trim().to_string(),
             color: r.color.unwrap_or_else(|| PALETTE[(zones.len() + 1) % PALETTE.len()].to_string()),
+            objects,
         };
         zones.push(z.clone());
         store_json(&st.zones_path(), &*zones)?;
         z
     };
+    if !z.objects.is_empty() {
+        crate::zonereview::set_status(&st, &z.id, &z.objects, Some("certified"), &who.username, "added by hand")?;
+    }
+    if r.weight.is_some() {
+        store_weight(&st, &z.id, r.weight)?;
+    }
     let st2 = st.clone();
     Ok(Json(tokio::task::spawn_blocking(move || zone_json(&st2, Some(&z))).await.unwrap_or(Value::Null)))
 }
@@ -391,12 +486,16 @@ pub async fn update_zone(State(st): St, Path(id): Path<String>, Json(r): Json<Zo
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "the Tier Zero zone is built in; change it with Tier Zero marks"));
     }
     validate_zone(&r)?;
+    let objects = r.objects.as_deref().map(clean_oids).transpose()?;
     let z = {
         let mut zones = st.zones.lock();
         let z = zones.iter_mut().find(|z| z.id == id).ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("no zone '{id}'")))?;
         z.name = r.name.trim().to_string();
         z.description = r.description.unwrap_or_default();
-        z.selector = r.selector;
+        z.selector = r.selector.trim().to_string();
+        if let Some(o) = objects {
+            z.objects = o;
+        }
         if let Some(c) = r.color {
             z.color = c;
         }
@@ -404,6 +503,9 @@ pub async fn update_zone(State(st): St, Path(id): Path<String>, Json(r): Json<Zo
         store_json(&st.zones_path(), &*zones)?;
         out
     };
+    if r.weight.is_some() {
+        store_weight(&st, &id, r.weight)?;
+    }
     st.zone_cache.lock().retain(|(_, zid), _| *zid != id);
     let st2 = st.clone();
     Ok(Json(tokio::task::spawn_blocking(move || zone_json(&st2, Some(&z))).await.unwrap_or(Value::Null)))
@@ -420,7 +522,93 @@ pub async fn delete_zone(State(st): St, Path(id): Path<String>) -> Result<Json<V
     drop(zones);
     crate::zonereview::forget_zone(&st, &id)?;
     st.zone_cache.lock().retain(|(_, zid), _| *zid != id);
+    if st.zone_weights.lock().contains_key(&id) {
+        store_weight(&st, &id, None)?;
+    }
     Ok(Json(json!({})))
+}
+
+#[derive(Deserialize)]
+pub struct ZoneObjectsReq {
+    #[serde(default)]
+    add: Vec<String>,
+    #[serde(default)]
+    remove: Vec<String>,
+}
+
+/// `POST /zones/{id}/objects`: add objects to a zone by hand (certified in
+/// zone review) or remove hand-added ones (their decision is cleared, so an
+/// object the selector still matches stays, as pending).
+pub async fn zone_objects(
+    State(st): St,
+    Extension(who): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(r): Json<ZoneObjectsReq>,
+) -> Result<Json<Value>, ApiError> {
+    if id == TIER0_ZONE {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "add objects to Tier Zero with Mark Tier Zero"));
+    }
+    let (add, remove) = (clean_oids(&r.add)?, clean_oids(&r.remove)?);
+    if add.is_empty() && remove.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "nothing to add or remove"));
+    }
+    check_known(&st, &add)?;
+    let (added, removed) = {
+        let mut zones = st.zones.lock();
+        let z = zones.iter_mut().find(|z| z.id == id).ok_or_else(|| ApiError::not_found(format!("no zone '{id}'")))?;
+        let added: Vec<String> = add.iter().filter(|o| !z.objects.contains(o)).cloned().collect();
+        let removed: Vec<String> = remove.iter().filter(|o| z.objects.contains(o) && !add.contains(o)).cloned().collect();
+        if z.objects.len() + added.len() - removed.len() > MAX_ZONE_OBJECTS {
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, format!("at most {MAX_ZONE_OBJECTS} objects added by hand")));
+        }
+        z.objects.retain(|o| !removed.contains(o));
+        z.objects.extend(added.iter().cloned());
+        z.objects.sort();
+        store_json(&st.zones_path(), &*zones)?;
+        (added, removed)
+    };
+    // Re-adding a revoked object certifies it again.
+    let certify: Vec<String> = add.clone();
+    if !certify.is_empty() {
+        crate::zonereview::set_status(&st, &id, &certify, Some("certified"), &who.username, "added by hand")?;
+    }
+    if !removed.is_empty() {
+        crate::zonereview::set_status(&st, &id, &removed, None, &who.username, "")?;
+    }
+    st.zone_cache.lock().retain(|(_, zid), _| *zid != id);
+    let st2 = st.clone();
+    tokio::task::spawn_blocking(move || {
+        // Removed objects the selector still matches stay in the zone.
+        let still: Vec<String> = {
+            let guard = st2.graph.read_recursive();
+            match guard.as_ref() {
+                Some(l) => {
+                    let m = zone_selector_matches(&st2, &l.graph, &id).unwrap_or_default();
+                    removed.iter().filter(|o| node_by_oid(&l.graph, o).is_some_and(|n| m.binary_search(&n).is_ok())).cloned().collect()
+                }
+                None => Vec::new(),
+            }
+        };
+        let z = st2.zones.lock().iter().find(|z| z.id == id).cloned();
+        Json(json!({"zone": zone_json(&st2, z.as_ref()), "added": added.len(), "removed": removed.len(), "still_matched": still}))
+    })
+    .await
+    .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+#[derive(Deserialize)]
+pub struct WeightReq {
+    weight: u32,
+}
+
+/// `PUT /zones/{id}/weight`: set a zone's weight (Tier Zero included).
+pub async fn set_zone_weight(State(st): St, Path(id): Path<String>, Json(r): Json<WeightReq>) -> Result<Json<Value>, ApiError> {
+    let w = check_weight(r.weight)?;
+    if id != TIER0_ZONE && !st.zones.lock().iter().any(|z| z.id == id) {
+        return Err(ApiError::not_found(format!("no zone '{id}'")));
+    }
+    store_weight(&st, &id, Some(w))?;
+    Ok(Json(json!({"id": id, "weight": w})))
 }
 
 async fn with_zone<T: Send + 'static>(
@@ -570,32 +758,53 @@ pub struct PlanReq {
     /// Propose fixes that need no maintenance window first.
     #[serde(default)]
     live_first: bool,
+    /// Plan across every zone at once, by zone weight (`zone` is ignored).
+    #[serde(default)]
+    weighted: bool,
+    /// Weights for this plan only, by zone id; others use the stored weight.
+    #[serde(default)]
+    weights: BTreeMap<String, u32>,
     timeout_ms: Option<u64>,
 }
 
+impl PlanReq {
+    fn options(&self, g: &Graph) -> Result<PlanOptions, ApiError> {
+        let mut fixed = Vec::new();
+        for k in &self.fixed_kinds {
+            fixed.push(g.edge_kind_id(k).ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, format!("unknown edge kind '{k}'")))?);
+        }
+        Ok(PlanOptions {
+            steps: self.steps.unwrap_or(10).clamp(1, 50),
+            fixed_kinds: fixed,
+            protect_target_membership: self.protect_target_membership.unwrap_or(true),
+            node_cost: if self.respect_fix_cost.unwrap_or(true) { fix_costs(g) } else { None },
+            live_first: self.live_first,
+        })
+    }
+    fn cancel(&self) -> ch_query::Cancel {
+        ch_query::Cancel::new(Some(std::time::Duration::from_millis(self.timeout_ms.unwrap_or(120_000).clamp(1000, 600_000))))
+    }
+}
+
+fn plan_edges_json(g: &Graph, edges: &[ch_analysis::EdgeKey]) -> Value {
+    edges.iter().take(50).map(|&(a, b, k)| json!({"src": node_json(g, a), "dst": node_json(g, b), "kind": g.edge_kind_name(k)})).collect()
+}
+
 pub async fn plan_api(State(st): St, Json(r): Json<PlanReq>) -> Result<Json<Value>, ApiError> {
+    if r.weighted {
+        return plan_weighted_api(st, r).await;
+    }
     let zone = r.zone.clone().unwrap_or_else(|| TIER0_ZONE.into());
     with_zone(st, zone, move |g, members| {
         let t = Instant::now();
-        let mut fixed = Vec::new();
-        for k in &r.fixed_kinds {
-            fixed.push(g.edge_kind_id(k).ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, format!("unknown edge kind '{k}'")))?);
-        }
-        let opts = PlanOptions {
-            steps: r.steps.unwrap_or(10).clamp(1, 50),
-            fixed_kinds: fixed,
-            protect_target_membership: r.protect_target_membership.unwrap_or(true),
-            node_cost: if r.respect_fix_cost.unwrap_or(true) { fix_costs(g) } else { None },
-            live_first: r.live_first,
-        };
-        let cancel = ch_query::Cancel::new(Some(std::time::Duration::from_millis(r.timeout_ms.unwrap_or(120_000).clamp(1000, 600_000))));
-        let p = plan(g, members, &opts, &cancel);
+        let opts = r.options(g)?;
+        let p = plan(g, members, &opts, &r.cancel());
         Ok(Json(json!({
             "baseline": p.baseline,
             "truncated": p.truncated,
             "steps": p.steps.iter().map(|s| json!({
                 "node": node_json(g, s.node),
-                "edges": s.edges.iter().take(50).map(|&(a, b, k)| json!({"src": node_json(g, a), "dst": node_json(g, b), "kind": g.edge_kind_name(k)})).collect::<Vec<_>>(),
+                "edges": plan_edges_json(g, &s.edges),
                 "edge_count": s.edges.len(),
                 "principals_cut": s.principals_cut,
                 "exposed_after": s.exposed_after,
@@ -606,6 +815,64 @@ pub async fn plan_api(State(st): St, Json(r): Json<PlanReq>) -> Result<Json<Valu
         })))
     })
     .await
+}
+
+/// Cross-zone plan: every zone with a weight above 0, scored by weight.
+async fn plan_weighted_api(st: Arc<AppState>, r: PlanReq) -> Result<Json<Value>, ApiError> {
+    for &w in r.weights.values() {
+        check_weight(w)?;
+    }
+    let zones = st.zones.lock().clone();
+    let mut list: Vec<(String, String, String)> = vec![(TIER0_ZONE.into(), "Tier Zero".into(), "#e5484d".into())];
+    list.extend(zones.into_iter().map(|z| (z.id, z.name, z.color)));
+    if let Some(id) = r.weights.keys().find(|id| !list.iter().any(|z| &z.0 == *id)) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, format!("no zone '{id}'")));
+    }
+    let weights: Vec<u32> = list.iter().map(|z| r.weights.get(&z.0).copied().unwrap_or_else(|| zone_weight(&st, &z.0))).collect();
+    if weights.iter().all(|&w| w == 0) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "every zone has weight 0"));
+    }
+    tokio::task::spawn_blocking(move || {
+        let guard = st.graph.read_recursive();
+        let l = guard.as_ref().ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "no graph loaded yet"))?;
+        let g = &l.graph;
+        let t = Instant::now();
+        // Weight-0 zones are left out (their members are not resolved).
+        let used: Vec<usize> = (0..list.len()).filter(|&i| weights[i] > 0).collect();
+        let mut members = Vec::with_capacity(used.len());
+        for &i in &used {
+            members.push(zone_members(&st, g, l.generation, &list[i].0)?);
+        }
+        let wz: Vec<WeightedZone> = used.iter().zip(&members).map(|(&i, m)| WeightedZone { weight: weights[i], targets: m }).collect();
+        let opts = r.options(g)?;
+        let p = plan_weighted(g, &wz, &opts, &r.cancel());
+        Ok(Json(json!({
+            "weighted": true,
+            "baseline": p.baseline,
+            "truncated": p.truncated,
+            "zones": used.iter().zip(&p.zone_baselines).map(|(&i, b)| json!({
+                "id": list[i].0, "name": list[i].1, "color": list[i].2, "weight": weights[i], "baseline": b,
+            })).collect::<Vec<_>>(),
+            "excluded_zones": (0..list.len()).filter(|&i| weights[i] == 0).map(|i| list[i].0.clone()).collect::<Vec<_>>(),
+            "steps": p.steps.iter().map(|s| json!({
+                "node": node_json(g, s.node),
+                "edges": plan_edges_json(g, &s.edges),
+                "edge_count": s.edges.len(),
+                "score": s.score,
+                "score_after": s.score_after,
+                "principals_cut": s.zones.iter().map(|z| z.principals_cut).sum::<u64>(),
+                "exposed_after": s.zones.iter().map(|z| z.exposed_after).sum::<u64>(),
+                "cumulative_reduction_percent": s.cumulative_reduction_percent,
+                "needs_window": s.needs_window,
+                "zones": used.iter().zip(&s.zones).map(|(&i, z)| json!({
+                    "id": list[i].0, "principals_cut": z.principals_cut, "exposed_after": z.exposed_after,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "elapsed_ms": t.elapsed().as_secs_f64() * 1e3,
+        })))
+    })
+    .await
+    .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 // -------------------------------------------------------------- posture
@@ -731,10 +998,27 @@ pub fn render_report(
     let tier0 = g.nodes_with_flag(flags::TIER0);
     let rep = exposure_with(g, &tier0, &Removal::default(), 10);
     let steps = plan_steps.min(50);
-    let p = (steps > 0 && ext != "csv").then(|| {
-        let opts = PlanOptions { steps, protect_target_membership: true, node_cost: fix_costs(g), ..Default::default() };
-        plan(g, &tier0, &opts, &ch_query::Cancel::new(Some(std::time::Duration::from_secs(120))))
-    });
+    let opts = PlanOptions { steps, protect_target_membership: true, node_cost: if ext != "csv" { fix_costs(g) } else { None }, ..Default::default() };
+    let p = (steps > 0 && ext != "csv").then(|| plan(g, &tier0, &opts, &ch_query::Cancel::new(Some(std::time::Duration::from_secs(120)))));
+    // Zones (Tier Zero first) and the cross-zone plan; zones whose selector
+    // fails are left out.
+    let (zones, cross) = if ext == "csv" {
+        (Vec::new(), None)
+    } else {
+        let defs = st.zones.lock().clone();
+        let mut zs: Vec<(String, u32, Vec<u32>)> = vec![("Tier Zero".into(), zone_weight(st, TIER0_ZONE), tier0.clone())];
+        for z in &defs {
+            if let Ok(m) = zone_members(st, g, l.generation, &z.id) {
+                zs.push((z.name.clone(), zone_weight(st, &z.id), m.to_vec()));
+            }
+        }
+        if zs.len() < 2 {
+            (Vec::new(), None)
+        } else {
+            let cancel = ch_query::Cancel::new(Some(std::time::Duration::from_secs(120)));
+            ch_analysis::report::zone_sections(g, &zs, (steps > 0).then_some(&opts), &cancel)
+        }
+    };
     let snap = l.snapshot_id();
     let title = title.filter(|t| !t.trim().is_empty()).unwrap_or("Attack path assessment");
     let generated = now_rfc3339();
@@ -768,6 +1052,8 @@ pub fn render_report(
         posture: &posture,
         plan: p.as_ref(),
         items_per_finding: items.min(10_000),
+        zones: &zones,
+        cross_zone_plan: cross.as_ref(),
     };
     let out = match ext {
         "html" => ch_analysis::report::render_html(&input),

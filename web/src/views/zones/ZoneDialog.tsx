@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ApiError, api, errorMessage } from "../../api/client";
 import type { Zone } from "../../api/types";
 import { Modal } from "../../components/Modal";
+import { NumberField } from "../../components/NumberField";
 import { ErrorExcerpt } from "../../tabs/queries/QueryEditor";
 
 /** Starting points for common zones. The OT ones use the `purdue_level` and
@@ -51,6 +52,8 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
   const [description, setDescription] = useState(editing?.description ?? "");
   const [color, setColor] = useState(editing?.color ?? "#a78bfa");
   const [selector, setSelector] = useState(editing?.selector ?? "MATCH (n:Computer) WHERE n.name STARTS WITH 'SRV' RETURN n");
+  const [weight, setWeight] = useState(editing?.weight ?? 1);
+  const byHand = editing?.objects.length ?? 0;
   const [error, setError] = useState<{ message: string; position: number | null } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -58,7 +61,7 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    const body = { name: name.trim(), description: description.trim(), selector, color };
+    const body = { name: name.trim(), description: description.trim(), selector, color, weight };
     try {
       onSaved(editing ? await api.updateZone(editing.id, body) : await api.createZone(body));
     } catch (err) {
@@ -110,8 +113,12 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
           </span>
         </label>
         <label>
-          Selector (CHQL; the nodes it returns are the members)
-          <textarea className="chql-editor" rows={4} value={selector} onChange={(e) => setSelector(e.target.value)} spellCheck={false} required />
+          Weight in cross-zone plans (0-100; 0 leaves the zone out)
+          <NumberField value={weight} min={0} max={100} onCommit={(v) => setWeight(Math.round(v))} />
+        </label>
+        <label>
+          Selector (CHQL; the nodes it returns are the members{byHand > 0 ? `, plus ${byHand} added by hand; may be empty` : ""})
+          <textarea className="chql-editor" rows={4} value={selector} onChange={(e) => setSelector(e.target.value)} spellCheck={false} required={byHand === 0} />
         </label>
         {error && <ErrorExcerpt query={selector} message={error.message} position={error.position} />}
         <div className="row gap">
@@ -119,7 +126,7 @@ export function ZoneDialog({ editing, onClose, onSaved }: Props) {
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={saving || !name.trim() || !selector.trim()}>
+          <button type="submit" className="primary" disabled={saving || !name.trim() || (!selector.trim() && byHand === 0)}>
             {saving ? "Validating…" : "Save zone"}
           </button>
         </div>

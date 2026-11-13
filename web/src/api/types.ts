@@ -561,6 +561,18 @@ export interface Zone {
   color: string;
   builtin: boolean;
   member_count: number;
+  /** Weight in cross-zone remediation plans (0-100, default 1). */
+  weight: number;
+  /** Object ids added by hand (upper case); members whatever the selector says. */
+  objects: string[];
+}
+
+export interface ZoneObjectsResponse {
+  zone: Zone;
+  added: number;
+  removed: number;
+  /** Removed objects the selector still matches (they stay in the zone). */
+  still_matched: string[];
 }
 
 export type TicketTargetType = "jira" | "servicenow" | "webhook";
@@ -657,6 +669,9 @@ export interface ZoneInput {
   description?: string;
   selector: string;
   color?: string;
+  weight?: number;
+  /** On create: objects added by hand. On update: replaces them. */
+  objects?: string[];
 }
 
 export interface Page<T> {
@@ -766,6 +781,10 @@ export interface PlanRequest {
   respect_fix_cost?: boolean;
   /** Propose fixes that need no maintenance window first. */
   live_first?: boolean;
+  /** Plan across every zone by weight (`zone` is ignored). */
+  weighted?: boolean;
+  /** Weights for this plan only, by zone id (others use the stored weight). */
+  weights?: Record<string, number>;
   timeout_ms?: number;
 }
 
@@ -786,13 +805,33 @@ export interface PlanStep {
   cumulative_reduction_percent: number;
   /** An edge of this step touches an object with fix_cost "window". */
   needs_window: boolean;
+  /** Weighted plans: sum over zones of weight × principals cut. */
+  score?: number;
+  /** Weighted plans: weighted exposure left. */
+  score_after?: number;
+  /** Weighted plans: what the step does to each zone (order of `PlanResponse.zones`). */
+  zones?: { id: string; principals_cut: number; exposed_after: number }[];
+}
+
+export interface PlanZone {
+  id: string;
+  name: string;
+  color: string;
+  weight: number;
+  /** Exposed principals before any step. */
+  baseline: number;
 }
 
 export interface PlanResponse {
+  /** Exposed principals, or weighted exposure for a weighted plan. */
   baseline: number;
   truncated: boolean;
   steps: PlanStep[];
   elapsed_ms: number;
+  weighted?: boolean;
+  zones?: PlanZone[];
+  /** Zones left out (weight 0). */
+  excluded_zones?: string[];
 }
 
 export interface Snapshot {

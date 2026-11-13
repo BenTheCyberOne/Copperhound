@@ -12,6 +12,7 @@ import { useApp } from "../../state/AppContext";
 import { useCatalog } from "../../state/CatalogContext";
 import { HandOffDialog } from "../../components/HandOffDialog";
 import { useFixList } from "../../state/FixListContext";
+import { useZones } from "../../state/ZonesContext";
 import { downloadCsv } from "../../util/csv";
 import { pctText } from "../../util/format";
 
@@ -28,6 +29,10 @@ export function Planner() {
   const { settings } = useSettings();
   const { track, loadResult, notify } = useApp();
   const fix = useFixList();
+  const { zones } = useZones();
+  const [scope, setScope] = useState<"zone" | "weighted">("zone");
+  /** Weights changed for this plan only, by zone id. */
+  const [weights, setWeights] = useState<Record<string, number>>({});
   const [zone, setZone] = useState("tier0");
   const [steps, setSteps] = useState(10);
   const [fixed, setFixed] = useState<Set<string>>(new Set(["Contains"]));
@@ -51,7 +56,7 @@ export function Planner() {
       setPlan(
         await track(
           api.remediationPlan({
-            zone,
+            ...(scope === "weighted" ? { weighted: true, weights } : { zone }),
             steps,
             fixed_kinds: [...fixed],
             protect_target_membership: protect,
@@ -77,17 +82,34 @@ export function Planner() {
     const n = fix.addEdges(s.flatMap((st) => st.edges));
     notify(n > 0 ? `Added ${n} edge${n === 1 ? "" : "s"} to the fix list.` : "Those edges are already in the fix list.");
   };
+  const zoneName = (id: string) => plan?.zones?.find((z) => z.id === id)?.name ?? id;
+  const perZone = (s: PlanStep) =>
+    (s.zones ?? [])
+      .filter((z) => z.principals_cut > 0)
+      .map((z) => `${zoneName(z.id)} −${fmt.format(z.principals_cut)}`)
+      .join(" · ");
   const exportCsv = (p: PlanResponse) =>
     downloadCsv(
-      `remediation-plan-${zone}.csv`,
-      ["step", "choke_object", "choke_kind", "principals_cut", "exposed_after", "cumulative_reduction_percent", "needs_window", "source", "edge", "target"],
+      p.weighted ? "remediation-plan-weighted.csv" : `remediation-plan-${zone}.csv`,
+      [
+        "step",
+        "choke_object",
+        "choke_kind",
+        ...(p.weighted ? ["weighted_cut", "weighted_exposure_after", "principals_cut_per_zone"] : ["principals_cut", "exposed_after"]),
+        "cumulative_reduction_percent",
+        "needs_window",
+        "source",
+        "edge",
+        "target",
+      ],
       p.steps.flatMap((s, i) =>
         s.edges.map((e) => [
           i + 1,
           s.node.name,
           s.node.kind,
-          s.principals_cut,
-          s.exposed_after,
+          ...(p.weighted
+            ? [s.score ?? 0, s.score_after ?? 0, (s.zones ?? []).map((z) => `${zoneName(z.id)}: ${z.principals_cut}`).join("; ")]
+            : [s.principals_cut, s.exposed_after]),
           s.cumulative_reduction_percent,
           s.needs_window ? "yes" : "no",
           e.src.name,
@@ -98,20 +120,64 @@ export function Planner() {
     );
 
   const last = plan?.steps[plan.steps.length - 1];
+  const unit = plan?.weighted ? "weighted exposure" : "exposed principals";
 
   return (
     <section className="card pane" aria-labelledby="plan-title">
       <h2 id="plan-title">Remediation planner</h2>
       <p className="muted small-text">
         Each step finds the object whose onward attack edges, once removed, cut the most principals off the zone entirely.
-        Cuts are exact, and the plan is recomputed after every step.
+        Cuts are exact, and the plan is recomputed after every step. Across all zones, each principal cut off a zone counts
+        that zone&apos;s weight.
       </p>
       <div className="form-grid">
-        <label htmlFor="plan-zone">Zone</label>
-        <ZoneSelect id="plan-zone" value={zone} onChange={setZone} />
+        <label htmlFor="plan-scope">Plan for</label>
+        <select id="plan-scope" value={scope} onChange={(e) => setScope(e.target.value as "zone" | "weighted")}>
+          <option value="zone">One zone</option>
+          <option value="weighted">All zones, by weight</option>
+        </select>
+        {scope === "zone" && (
+          <>
+            <label htmlFor="plan-zone">Zone</label>
+            <ZoneSelect id="plan-zone" value={zone} onChange={setZone} />
+          </>
+        )}
         <label htmlFor="plan-steps">Steps</label>
         <NumberField id="plan-steps" min={1} max={50} value={steps} onCommit={(v) => setSteps(Math.round(v))} />
       </div>
+      {scope === "weighted" && (
+        <table className="data-table compact">
+          <caption className="muted small-text">
+            Weights for this plan (0 leaves a zone out). Set the defaults on each zone&apos;s page.
+          </caption>
+          <thead>
+            <tr>
+              <th>Zone</th>
+              <th className="num">Members</th>
+              <th className="num">Weight</th>
+            </tr>
+          </thead>
+          <tbody>
+            {zones.map((z) => (
+              <tr key={z.id}>
+                <td>
+                  <span className="zone-swatch" style={{ background: z.color }} /> {z.name}
+                </td>
+                <td className="num">{fmt.format(z.member_count)}</td>
+                <td className="num">
+                  <NumberField
+                    aria-label={`Weight of ${z.name}`}
+                    min={0}
+                    max={100}
+                    value={weights[z.id] ?? z.weight}
+                    onCommit={(v) => setWeights((w) => ({ ...w, [z.id]: Math.round(v) }))}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <label className="toggle">
         <input type="checkbox" checked={protect} onChange={(e) => setProtect(e.target.checked)} />
         Treat members of zone groups as part of the zone (never propose removing admins from admin groups)
@@ -141,19 +207,21 @@ export function Planner() {
         </p>
       )}
 
-      {plan && plan.steps.length === 0 && <p className="muted">Nothing to cut: no principal has a path into this zone.</p>}
+      {plan && plan.steps.length === 0 && (
+        <p className="muted">Nothing to cut: no principal has a path into {plan.weighted ? "any weighted zone" : "this zone"}.</p>
+      )}
       {plan && last && (
         <div className="plan-result" aria-live="polite">
           <div className="sim-cards">
             <div className="stat">
               <span className="stat-label">Baseline</span>
               <span className="stat-value">{fmt.format(plan.baseline)}</span>
-              <span className="stat-label">exposed principals</span>
+              <span className="stat-label">{unit}</span>
             </div>
             <div className="stat">
               <span className="stat-label">After {plan.steps.length} steps</span>
-              <span className="stat-value">{fmt.format(last.exposed_after)}</span>
-              <span className="stat-label">exposed principals</span>
+              <span className="stat-value">{fmt.format(plan.weighted ? (last.score_after ?? 0) : last.exposed_after)}</span>
+              <span className="stat-label">{unit}</span>
             </div>
             <div className="stat reduction good">
               <span className="stat-label">Reduction</span>
@@ -162,6 +230,12 @@ export function Planner() {
             </div>
           </div>
           {plan.truncated && <p className="warn-text small-text">The planner stopped early (time limit); the plan is partial.</p>}
+          {plan.weighted && plan.zones && (
+            <p className="muted small-text">
+              {plan.zones.map((z) => `${z.name} ×${z.weight}: ${fmt.format(z.baseline)} exposed`).join(" · ")}
+              {(plan.excluded_zones?.length ?? 0) > 0 && ` · left out (weight 0): ${plan.excluded_zones!.length}`}
+            </p>
+          )}
 
           <TimeChart
             title="Cumulative exposure reduction"
@@ -212,10 +286,17 @@ export function Planner() {
                         </>
                       )}
                     </div>
-                    <div className="muted small-text">
-                      cuts {fmt.format(s.principals_cut)} principals · {fmt.format(s.exposed_after)} still exposed ·{" "}
-                      <strong>{pctText(s.cumulative_reduction_percent)}</strong> total reduction
-                    </div>
+                    {plan.weighted ? (
+                      <div className="muted small-text">
+                        weighted cut {fmt.format(s.score ?? 0)} ({perZone(s)}) · {fmt.format(s.score_after ?? 0)} left ·{" "}
+                        <strong>{pctText(s.cumulative_reduction_percent)}</strong> total reduction
+                      </div>
+                    ) : (
+                      <div className="muted small-text">
+                        cuts {fmt.format(s.principals_cut)} principals · {fmt.format(s.exposed_after)} still exposed ·{" "}
+                        <strong>{pctText(s.cumulative_reduction_percent)}</strong> total reduction
+                      </div>
+                    )}
                   </div>
                   <div className="row-actions">
                     <button type="button" className="small" onClick={() => show([s])}>

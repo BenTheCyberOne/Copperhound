@@ -6,6 +6,23 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-zone remediation plans**. Zones have a weight (0-100, default 1;
+  Tier Zero included). **All zones, by weight** in the remediation planner
+  picks, at each step, the fix that cuts the most weighted exposure (weight ×
+  principals cut off, summed over zones) and shows the cut per zone.
+  `PUT /zones/{id}/weight`, `"weighted": true` on `POST /remediation-plan`,
+  and `copperhound plan --zone NAME=WEIGHT:SELECTOR --tier0-weight N`.
+- **Add to zone…** on the canvas context menu and the details drawer puts
+  objects into a zone by hand, or starts a new zone with them. Hand-added
+  objects are members whatever the selector matches and are certified in
+  zone review; a zone's selector may now be empty.
+  `POST /zones/{id}/objects`.
+- Reports (HTML and Markdown, including scheduled ones) have a **Zones**
+  section with exposure per zone and the cross-zone plan, when custom zones
+  exist. `copperhound report --zone …` does the same from the command line.
+
 ## [0.2.0] - 2026-11-13
 
 OT support and bug fixes.

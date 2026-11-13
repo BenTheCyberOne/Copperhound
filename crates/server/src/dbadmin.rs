@@ -144,6 +144,8 @@ pub async fn clear(State(st): St, Extension(who): Extension<Principal>, Json(r):
             st.zone_cache.lock().clear();
             store_json::<[ZoneDef]>(&st.zones_path(), &[]).map_err(ApiError::from)?;
             let _ = std::fs::remove_file(st.data_dir.join("zone_reviews.json"));
+            st.zone_weights.lock().clear();
+            let _ = std::fs::remove_file(st.zone_weights_path());
             out.insert("zones_cleared".into(), json!(true));
         }
         if r.graph {

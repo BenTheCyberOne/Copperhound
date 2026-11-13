@@ -3,6 +3,7 @@ import { api, errorMessage } from "../../api/client";
 import type { Zone } from "../../api/types";
 import { ExposureReport } from "../../components/ExposureReport";
 import { KindBadge } from "../../components/KindBadge";
+import { NumberField } from "../../components/NumberField";
 import { Pager } from "../../components/Pager";
 import { EmptyState, StatusView } from "../../components/StatusView";
 import { useChokeActions } from "../../components/useChokeActions";
@@ -47,6 +48,11 @@ export function ZonesView({ zoneId }: { zoneId: string | null }) {
                   <span className="zone-swatch" style={{ background: z.color }} />
                   <span className="zone-name">{z.name}</span>
                   {z.builtin && <span className="tag">built-in</span>}
+                  {z.weight !== 1 && (
+                    <span className="tag" title="Weight in cross-zone remediation plans">
+                      ×{z.weight}
+                    </span>
+                  )}
                   <span className="muted num small-text">{z.member_count.toLocaleString()}</span>
                 </a>
               </li>
@@ -87,6 +93,31 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
   const { shown, showChoke, addChoke } = useChokeActions(zone.id);
   const ringOn = !settings.hiddenZoneRings.includes(zone.id);
 
+  const byHand = new Set(zone.objects);
+  const removeObject = async (oid: string, name: string) => {
+    try {
+      const r = await track(api.zoneObjects(zone.id, { remove: [oid] }));
+      notify(
+        r.still_matched.length > 0
+          ? `${name} is no longer added by hand, but the selector still matches it. Revoke it in Review to keep it out.`
+          : `Removed ${name} from “${zone.name}”.`,
+        r.still_matched.length > 0 ? "warn" : undefined,
+      );
+      reload();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
+  const setWeight = async (w: number) => {
+    try {
+      await track(api.setZoneWeight(zone.id, w));
+      reload();
+    } catch (e) {
+      notify(errorMessage(e), "error");
+    }
+  };
+
   const remove = async () => {
     if (!window.confirm(`Delete zone “${zone.name}”?`)) return;
     try {
@@ -118,6 +149,17 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
             />
             Ring on canvas
           </label>
+          <label className="row gap" title="How much this zone counts in cross-zone remediation plans (0 leaves it out)">
+            Plan weight
+            <NumberField
+              value={zone.weight}
+              min={0}
+              max={100}
+              aria-label="Plan weight"
+              onCommit={(v) => void setWeight(Math.round(v))}
+              {...gate("analyst")}
+            />
+          </label>
           {!zone.builtin && (
             <>
               <button type="button" className="small" onClick={onEdit} {...gate("analyst")}>
@@ -131,19 +173,28 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
         </div>
       </div>
       {zone.description && <p>{zone.description}</p>}
-      <div className="selector-row">
-        <pre className="code-block">{zone.selector}</pre>
-        <button
-          type="button"
-          className="small"
-          onClick={() => {
-            openInEditor(zone.selector);
-            navigate("explore");
-          }}
-        >
-          Open in editor
-        </button>
-      </div>
+      {zone.selector.trim() ? (
+        <div className="selector-row">
+          <pre className="code-block">{zone.selector}</pre>
+          <button
+            type="button"
+            className="small"
+            onClick={() => {
+              openInEditor(zone.selector);
+              navigate("explore");
+            }}
+          >
+            Open in editor
+          </button>
+        </div>
+      ) : (
+        <p className="muted small-text">No selector: the members are added by hand (right-click an object → Add to zone…).</p>
+      )}
+      {zone.selector.trim() && zone.objects.length > 0 && (
+        <p className="muted small-text">
+          Plus {zone.objects.length.toLocaleString()} object{zone.objects.length === 1 ? "" : "s"} added by hand.
+        </p>
+      )}
 
       <div className="tabs inline-tabs" role="tablist">
         {(zone.builtin ? (["exposure", "members"] as const) : (["exposure", "members", "review"] as const)).map((t) => (
@@ -196,6 +247,7 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
                       <th>Name</th>
                       <th>Kind</th>
                       <th>Status</th>
+                      {byHand.size > 0 && <th aria-label="Actions" />}
                     </tr>
                   </thead>
                   <tbody>
@@ -205,11 +257,23 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
                         <td>
                           <KindBadge kind={n.kind} />
                         </td>
-                        <td className="tags">
+                        <td>
+                          <span className="tags">
                           {!n.enabled && <span className="tag off">disabled</span>}
                           {n.tier0 && <span className="tag tier0">Tier Zero</span>}
                           {n.owned && <span className="tag owned">owned</span>}
+                          {byHand.has(n.objectid.toUpperCase()) && <span className="tag">added by hand</span>}
+                          </span>
                         </td>
+                        {byHand.size > 0 && (
+                          <td>
+                            {byHand.has(n.objectid.toUpperCase()) && (
+                              <button type="button" className="small" onClick={() => void removeObject(n.objectid, n.name)} {...gate("analyst")}>
+                                Remove
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

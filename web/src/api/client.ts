@@ -55,6 +55,7 @@ import type {
   TicketTargetIn,
   Zone,
   ZoneInput,
+  ZoneObjectsResponse,
   Direction,
   ClearRequest,
   ClearResponse,
@@ -563,6 +564,10 @@ export const api = {
   createZone: (z: ZoneInput) => call<Zone>("POST", "/zones", { body: z }),
   updateZone: (id: string, z: ZoneInput) => call<Zone>("PUT", `/zones/${encodeURIComponent(id)}`, { body: z }),
   deleteZone: (id: string) => call<object>("DELETE", `/zones/${encodeURIComponent(id)}`),
+  zoneObjects: (id: string, change: { add?: string[]; remove?: string[] }) =>
+    call<ZoneObjectsResponse>("POST", `/zones/${encodeURIComponent(id)}/objects`, { body: change }),
+  setZoneWeight: (id: string, weight: number) =>
+    call<{ id: string; weight: number }>("PUT", `/zones/${encodeURIComponent(id)}/weight`, { body: { weight } }),
   zoneMembers: (id: string, offset = 0, limit = 200) =>
     call<Page<Node>>("GET", `/zones/${encodeURIComponent(id)}/members`, { query: { offset, limit } }),
   zoneReview: (id: string, status: ReviewStatus | "", offset = 0, limit = 200) =>

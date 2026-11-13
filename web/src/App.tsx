@@ -17,6 +17,7 @@ import { CatalogProvider } from "./state/CatalogContext";
 import { FixListProvider } from "./state/FixListContext";
 import { SessionProvider } from "./state/SessionContext";
 import { ZonesProvider } from "./state/ZonesContext";
+import { ZoneDialogs } from "./views/zones/AddToZoneDialog";
 import { AccountView } from "./views/AccountView";
 import { AdminView } from "./views/admin/AdminView";
 import { AlertsView } from "./views/AlertsView";
@@ -167,6 +168,7 @@ export function App() {
                       setLoginNotice(notice);
                     }}
                   />
+                  <ZoneDialogs />
                 </AppProvider>
               </FixListProvider>
             </ZonesProvider>

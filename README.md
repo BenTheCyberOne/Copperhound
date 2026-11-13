@@ -68,7 +68,8 @@ Computed in the background after every ingest:
   *entirely*. The plan is recomputed after each step, so the cumulative
   reduction curve is exact. Members of zone groups are treated
   as part of the zone, so it never proposes "remove the admins from Domain
-  Admins".
+  Admins". Give zones weights and it plans across all of them at once,
+  ranking fixes by weighted exposure cut.
 - **Remediation hand-off** — turn fix-list edges or plan steps into a
   PowerShell script (one suggested command per edge, objects named by SID /
   object id) or into Jira issues, ServiceNow records or signed webhook events

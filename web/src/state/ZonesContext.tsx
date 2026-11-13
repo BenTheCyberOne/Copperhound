@@ -3,7 +3,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { NodeId, Zone } from "../api/types";
+import type { Node, NodeId, Zone } from "../api/types";
 import { useCatalog } from "./CatalogContext";
 
 export const MEMBER_FETCH_LIMIT = 20000;
@@ -17,6 +17,9 @@ interface ZonesState {
   /** Member ids per zone id (only zones small enough to fetch). */
   members: Map<string, Set<NodeId>>;
   zone: (id: string) => Zone | undefined;
+  /** Objects waiting in the "Add to zone…" dialog (null when closed). */
+  addToZone: Node[] | null;
+  openAddToZone: (nodes: Node[] | null) => void;
 }
 
 const Ctx = createContext<ZonesState | null>(null);
@@ -38,6 +41,7 @@ export function ZonesProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   const [members, setMembers] = useState<Map<string, Set<NodeId>>>(new Map());
   const [nonce, setNonce] = useState(0);
+  const [addToZone, openAddToZone] = useState<Node[] | null>(null);
 
   useEffect(() => {
     if (generation === null) return;
@@ -70,8 +74,8 @@ export function ZonesProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const value = useMemo<ZonesState>(
-    () => ({ zones, error, loaded, reload, members, zone: (id) => zones.find((z) => z.id === id) }),
-    [zones, error, loaded, reload, members],
+    () => ({ zones, error, loaded, reload, members, zone: (id) => zones.find((z) => z.id === id), addToZone, openAddToZone }),
+    [zones, error, loaded, reload, members, addToZone],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

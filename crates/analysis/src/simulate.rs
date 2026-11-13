@@ -398,6 +398,42 @@ impl Planner {
         l != UNDEF && self.pre[l as usize] != UNDEF
     }
 
+    /// `v` is a zone member (after membership expansion).
+    fn is_target(&self, v: u32) -> bool {
+        let l = self.local[v as usize];
+        l != UNDEF && self.target[l as usize]
+    }
+
+    /// Principals `v` alone cuts off in the last [`Self::dominate`] run (0 for
+    /// zone members and unreachable nodes).
+    fn cut_of(&self, v: u32) -> u64 {
+        let l = self.local[v as usize];
+        if l == UNDEF || self.target[l as usize] {
+            return 0;
+        }
+        match self.pre[l as usize] {
+            UNDEF => 0,
+            LEAF_REACHED => self.principal[l as usize] as u64,
+            p => self.cnt[p as usize],
+        }
+    }
+
+    /// Every node that cuts at least one principal off in the last
+    /// [`Self::dominate`] run, with its cut (zone members excluded).
+    fn for_each_cut(&self, mut f: impl FnMut(u32, u64)) {
+        for (w, &c) in self.cnt.iter().enumerate().skip(1) {
+            let l = self.vert[w] as usize;
+            if c > 0 && !self.target[l] {
+                f(self.nodes[l], c);
+            }
+        }
+        for l in self.ncore..self.nodes.len() {
+            if self.principal[l] && self.pre[l] == LEAF_REACHED {
+                f(self.nodes[l], 1);
+            }
+        }
+    }
+
     /// Sever a choke object: it and everything it dominates drop out.
     fn kill(&mut self, v: u32) {
         let l = self.local[v as usize];
@@ -549,6 +585,186 @@ fn eval(v: u32, last: u32, link: &mut [[u32; 2]], stack: &mut Vec<u32>) -> u32 {
     best
 }
 
+/// The best qualifying choke object among `ranked` (best first): all its
+/// onward attack edges (from `onward`) are removable — none of a
+/// `fixed_kinds` kind, no end with fix cost `Fixed`. With `live_first`, the
+/// first live candidate wins over the first window one. Returns
+/// `(node, score, onward edges, needs_window)`.
+fn pick_candidate(
+    opts: &PlanOptions,
+    ranked: impl Iterator<Item = (u32, u64)>,
+    onward: impl Fn(u32) -> Vec<EdgeKey>,
+) -> Option<(u32, u64, Vec<EdgeKey>, bool)> {
+    let cost = |n: u32| opts.node_cost.as_ref().map_or(FixCost::Live as u8, |c| c[n as usize]);
+    let mut window_pick = None;
+    for (d, score) in ranked {
+        let edges = onward(d);
+        if edges.is_empty() || edges.iter().any(|e| opts.fixed_kinds.contains(&e.2)) {
+            continue;
+        }
+        let worst = edges.iter().map(|e| cost(e.0).max(cost(e.1))).max().unwrap_or(0);
+        if worst >= FixCost::Fixed as u8 {
+            continue;
+        }
+        let needs_window = worst == FixCost::Window as u8;
+        if needs_window && opts.live_first {
+            window_pick.get_or_insert((d, score, edges, true));
+            continue;
+        }
+        return Some((d, score, edges, needs_window));
+    }
+    window_pick
+}
+
+/// One zone of a weighted plan: its weight and members.
+#[derive(Debug, Clone, Copy)]
+pub struct WeightedZone<'a> {
+    /// Relative importance; 0 leaves the zone out.
+    pub weight: u32,
+    pub targets: &'a [u32],
+}
+
+/// What a weighted step does to one zone.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ZoneCut {
+    pub principals_cut: u64,
+    pub exposed_after: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WeightedStep {
+    pub node: u32,
+    pub edges: Vec<EdgeKey>,
+    /// Weighted cut: sum over zones of weight × principals cut off that zone.
+    pub score: u64,
+    /// Weighted exposure left: sum over zones of weight × exposed principals.
+    pub score_after: u64,
+    pub cumulative_reduction_percent: f64,
+    pub needs_window: bool,
+    /// Per zone, in input order (zeros for weight-0 zones).
+    pub zones: Vec<ZoneCut>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WeightedPlan {
+    /// Weighted exposure before any step.
+    pub baseline: u64,
+    /// Exposed principals per zone before any step, in input order.
+    pub zone_baselines: Vec<u64>,
+    pub steps: Vec<WeightedStep>,
+    pub truncated: bool,
+}
+
+/// Remediation plan across several zones at once: each step severs the choke
+/// object with the largest weighted cut (sum over zones of weight × principals
+/// it alone cuts off from that zone, exact via one dominator tree per zone),
+/// then recomputes every zone. A principal exposed to two zones counts in
+/// both. Candidate rules and ties are as in [`plan`]; with one zone of weight
+/// 1 the plan is the same as [`plan`]'s.
+pub fn plan_weighted(g: &Graph, zones: &[WeightedZone<'_>], opts: &PlanOptions, cancel: &Cancel) -> WeightedPlan {
+    let f = EdgeFilter::traversable(g);
+    let mut steps = Vec::new();
+    let mut truncated = false;
+    let mut planners: Vec<Option<Planner>> = Vec::with_capacity(zones.len());
+    if opts.steps > 0 {
+        for z in zones {
+            if z.weight == 0 {
+                planners.push(None);
+                continue;
+            }
+            let zone = if opts.protect_target_membership { expand_membership(g, z.targets) } else { z.targets.to_vec() };
+            match Planner::new(g, &zone, &f, cancel) {
+                Some(p) => planners.push(Some(p)),
+                None => {
+                    return WeightedPlan { baseline: 0, zone_baselines: vec![0; zones.len()], steps, truncated: true };
+                }
+            }
+        }
+    }
+    let mut zone_baselines: Option<Vec<u64>> = None;
+    let mut baseline = 0u64;
+    let mut score = vec![0u64; if opts.steps > 0 { g.node_count() } else { 0 }];
+    let mut touched: Vec<u32> = Vec::new();
+    while steps.len() < opts.steps {
+        let mut exposed = vec![0u64; zones.len()];
+        for (i, p) in planners.iter_mut().enumerate() {
+            let Some(p) = p else { continue };
+            let Some(dom) = p.dominate(cancel) else {
+                truncated = true;
+                break;
+            };
+            exposed[i] = dom.exposed;
+        }
+        if truncated {
+            break;
+        }
+        if zone_baselines.is_none() {
+            baseline = zones.iter().zip(&exposed).map(|(z, &e)| z.weight as u64 * e).sum();
+            zone_baselines = Some(exposed.clone());
+        }
+        // Exact weighted cut of every candidate, over all zones.
+        for (z, p) in zones.iter().zip(&planners) {
+            let Some(p) = p else { continue };
+            let w = z.weight as u64;
+            p.for_each_cut(|v, c| {
+                let s = &mut score[v as usize];
+                if *s == 0 {
+                    touched.push(v);
+                }
+                *s += w * c;
+            });
+        }
+        let mut ranked: Vec<(u32, u64)> = touched.iter().map(|&v| (v, score[v as usize])).collect();
+        for &v in &touched {
+            score[v as usize] = 0;
+        }
+        touched.clear();
+        let order = |a: &(u32, u64), b: &(u32, u64)| b.1.cmp(&a.1).then(a.0.cmp(&b.0));
+        if ranked.len() > PICK_WINDOW {
+            ranked.select_nth_unstable_by(PICK_WINDOW - 1, order);
+            ranked.truncate(PICK_WINDOW);
+        }
+        ranked.sort_unstable_by(order);
+        // Severing `d` deletes it from every zone it is not a member of, so its
+        // fix is every onward edge into a node reachable in such a zone.
+        let live: Vec<&Planner> = planners.iter().flatten().collect();
+        let pick = pick_candidate(opts, ranked.into_iter(), |d| {
+            let own: Vec<&&Planner> = live.iter().filter(|p| p.reachable(d) && !p.is_target(d)).collect();
+            let (ds, ks) = g.out_edges(d);
+            ds.iter()
+                .zip(ks)
+                .filter(|(&v, &k)| f.allows(k) && own.iter().any(|p| p.reachable(v)))
+                .map(|(&v, &k)| (d, v, k))
+                .collect()
+        });
+        let Some((node, s, onward, needs_window)) = pick else { break };
+        let cuts: Vec<ZoneCut> = planners
+            .iter()
+            .zip(&exposed)
+            .map(|(p, &e)| {
+                let c = p.as_ref().map_or(0, |p| p.cut_of(node));
+                ZoneCut { principals_cut: c, exposed_after: e - c }
+            })
+            .collect();
+        for p in planners.iter_mut().flatten() {
+            if !p.is_target(node) {
+                p.kill(node);
+            }
+        }
+        let score_after: u64 = zones.iter().zip(&cuts).map(|(z, c)| z.weight as u64 * c.exposed_after).sum();
+        steps.push(WeightedStep {
+            node,
+            edges: onward,
+            score: s,
+            score_after,
+            cumulative_reduction_percent: if baseline == 0 { 0.0 } else { 100.0 * (baseline - score_after) as f64 / baseline as f64 },
+            needs_window,
+            zones: cuts,
+        });
+    }
+    WeightedPlan { baseline, zone_baselines: zone_baselines.unwrap_or_else(|| vec![0; zones.len()]), steps, truncated }
+}
+
 /// Remediation plan: each step severs the single choke object that cuts the
 /// most principals off from the zone entirely (exact, via dominators), then
 /// recomputes. A choke object qualifies only if all its onward attack edges are
@@ -568,36 +784,12 @@ pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> 
             break;
         };
         let base = *baseline.get_or_insert(dom.exposed);
-        // Best choke object whose onward edges are all removable. `ranked` is
-        // ordered by cut, then node id, so the first qualifying entry wins;
-        // with `live_first` the first live one wins over the first window one.
-        let cost = |n: u32| opts.node_cost.as_ref().map_or(FixCost::Live as u8, |c| c[n as usize]);
-        let mut window_pick = None;
-        let mut pick = None;
-        for &(d, cut) in &dom.ranked {
+        let pl = &*planner;
+        let pick = pick_candidate(opts, dom.ranked.iter().copied(), |d| {
             let (ds, ks) = g.out_edges(d);
-            let onward: Vec<EdgeKey> = ds
-                .iter()
-                .zip(ks)
-                .filter(|(&v, &k)| f.allows(k) && planner.reachable(v))
-                .map(|(&v, &k)| (d, v, k))
-                .collect();
-            if onward.is_empty() || onward.iter().any(|e| opts.fixed_kinds.contains(&e.2)) {
-                continue;
-            }
-            let worst = onward.iter().map(|e| cost(e.0).max(cost(e.1))).max().unwrap_or(0);
-            if worst >= FixCost::Fixed as u8 {
-                continue;
-            }
-            let needs_window = worst == FixCost::Window as u8;
-            if needs_window && opts.live_first {
-                window_pick.get_or_insert((d, cut, onward, true));
-                continue;
-            }
-            pick = Some((d, cut, onward, needs_window));
-            break;
-        }
-        let Some((node, cut, onward, needs_window)) = pick.or(window_pick) else { break };
+            ds.iter().zip(ks).filter(|(&v, &k)| f.allows(k) && pl.reachable(v)).map(|(&v, &k)| (d, v, k)).collect()
+        });
+        let Some((node, cut, onward, needs_window)) = pick else { break };
         planner.kill(node);
         let exposed_after = dom.exposed - cut;
         steps.push(PlanStep {
@@ -941,6 +1133,159 @@ mod tests {
             let opts = PlanOptions { steps: 10, fixed_kinds: vec![], protect_target_membership: true, ..Default::default() };
             assert_same(&g, &targets, &opts, &format!("large seed {seed}"));
         }
+    }
+
+    /// Reference weighted plan: per-zone dominators recomputed from scratch with
+    /// the edges of earlier steps removed; scores summed over every node.
+    fn reference_weighted(g: &Graph, zones: &[(u32, Vec<u32>)], opts: &PlanOptions) -> WeightedPlan {
+        let f = EdgeFilter::traversable(g);
+        let cancel = Cancel::never();
+        let zs: Vec<Vec<u32>> =
+            zones.iter().map(|(_, t)| if opts.protect_target_membership { expand_membership(g, t) } else { t.clone() }).collect();
+        let mut removal = Removal::default();
+        let mut steps = Vec::new();
+        let mut zone_baselines = None;
+        let mut baseline = 0;
+        let cost = |n: u32| opts.node_cost.as_ref().map_or(0, |c| c[n as usize]);
+        while steps.len() < opts.steps {
+            let allow = |s: u32, d: u32, k: u16| f.allows(k) && !removal.blocks(s, d, k);
+            let doms: Vec<Option<RefDom>> =
+                zones.iter().zip(&zs).map(|((w, _), t)| (*w > 0).then(|| ref_dominate(g, t, &allow, &cancel).unwrap())).collect();
+            let exposed: Vec<u64> = doms.iter().map(|d| d.as_ref().map_or(0, |d| d.exposed)).collect();
+            if zone_baselines.is_none() {
+                baseline = zones.iter().zip(&exposed).map(|((w, _), e)| *w as u64 * e).sum();
+                zone_baselines = Some(exposed.clone());
+            }
+            let cut = |z: usize, v: u32| doms[z].as_ref().and_then(|d| d.ranked.iter().find(|r| r.0 == v)).map_or(0, |r| r.1);
+            let mut score = std::collections::BTreeMap::<u32, u64>::new();
+            for (z, d) in doms.iter().enumerate() {
+                for &(v, c) in d.iter().flat_map(|d| &d.ranked) {
+                    *score.entry(v).or_default() += zones[z].0 as u64 * c;
+                }
+            }
+            let mut ranked: Vec<(u32, u64)> = score.into_iter().collect();
+            ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            let is_t = |z: usize, v: u32| zs[z].contains(&v);
+            let candidates: Vec<(u32, u64, Vec<EdgeKey>, u8)> = ranked
+                .iter()
+                .take(256)
+                .filter_map(|&(d, s)| {
+                    let own: Vec<usize> =
+                        (0..zones.len()).filter(|&z| doms[z].as_ref().is_some_and(|x| x.reachable[d as usize]) && !is_t(z, d)).collect();
+                    let (ds, ks) = g.out_edges(d);
+                    let onward: Vec<EdgeKey> = ds
+                        .iter()
+                        .zip(ks)
+                        .filter(|(&v, &k)| allow(d, v, k) && own.iter().any(|&z| doms[z].as_ref().unwrap().reachable[v as usize]))
+                        .map(|(&v, &k)| (d, v, k))
+                        .collect();
+                    let worst = onward.iter().map(|e| cost(e.0).max(cost(e.1))).max().unwrap_or(0);
+                    (!onward.is_empty() && onward.iter().all(|e| !opts.fixed_kinds.contains(&e.2)) && worst < 2)
+                        .then_some((d, s, onward, worst))
+                })
+                .collect();
+            let pick = if opts.live_first { candidates.iter().find(|c| c.3 == 0).or(candidates.first()) } else { candidates.first() };
+            let Some((node, s, onward, worst)) = pick.cloned() else { break };
+            let cuts: Vec<ZoneCut> =
+                (0..zones.len()).map(|z| ZoneCut { principals_cut: cut(z, node), exposed_after: exposed[z] - cut(z, node) }).collect();
+            removal.edges.extend(onward.iter().copied());
+            let score_after: u64 = zones.iter().zip(&cuts).map(|((w, _), c)| *w as u64 * c.exposed_after).sum();
+            steps.push(WeightedStep {
+                node,
+                edges: onward,
+                score: s,
+                score_after,
+                cumulative_reduction_percent: if baseline == 0 { 0.0 } else { 100.0 * (baseline - score_after) as f64 / baseline as f64 },
+                needs_window: worst == 1,
+                zones: cuts,
+            });
+        }
+        WeightedPlan { baseline, zone_baselines: zone_baselines.unwrap_or_else(|| vec![0; zones.len()]), steps, truncated: false }
+    }
+
+    fn assert_weighted_same(g: &Graph, zones: &[(u32, Vec<u32>)], opts: &PlanOptions, ctx: &str) -> usize {
+        let wz: Vec<WeightedZone> = zones.iter().map(|(w, t)| WeightedZone { weight: *w, targets: t }).collect();
+        let a = plan_weighted(g, &wz, opts, &Cancel::never());
+        let b = reference_weighted(g, zones, opts);
+        assert_eq!((a.baseline, &a.zone_baselines, a.truncated), (b.baseline, &b.zone_baselines, false), "{ctx}: baseline");
+        assert_eq!(a.steps.len(), b.steps.len(), "{ctx}: step count");
+        for (i, (x, y)) in a.steps.iter().zip(&b.steps).enumerate() {
+            assert_eq!(
+                (x.node, &x.edges, x.score, x.score_after, &x.zones, x.needs_window),
+                (y.node, &y.edges, y.score, y.score_after, &y.zones, y.needs_window),
+                "{ctx}: step {i}"
+            );
+            assert_eq!(x.cumulative_reduction_percent, y.cumulative_reduction_percent, "{ctx}: step {i} percent");
+        }
+        a.steps.iter().filter(|s| s.zones.iter().filter(|z| z.principals_cut > 0).count() > 1).count()
+    }
+
+    #[test]
+    fn weighted_matches_reference() {
+        let mut multi = 0;
+        for seed in 0..250u64 {
+            let n = 20 + (seed * 37 % 250) as u32;
+            let g = random_graph(n, n as usize * (1 + (seed % 4) as usize), 1 + (seed % 3) as u32, 9000 + seed);
+            let mut r = Rng(seed * 104_729 + 3);
+            let mut pick = |k: u64| -> Vec<u32> {
+                let mut v: Vec<u32> = (0..k).map(|_| r.below(n as u64 / 2 + 1) as u32).collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            };
+            let zones = vec![
+                (1 + (seed % 5) as u32, g.nodes_with_flag(flags::TIER0)),
+                ((seed % 3) as u32 * 2, pick(2)),
+                (1 + (seed % 7) as u32, pick(1 + seed % 4)),
+            ];
+            let cost: Vec<u8> = (0..n).map(|i| [0, 0, 0, 0, 0, 0, 0, 1, 1, 2][((i as u64 * 31 + seed) % 10) as usize]).collect();
+            for (protect, fixed, node_cost, live_first) in [
+                (true, vec![], None, false),
+                (false, vec![], None, false),
+                (true, vec![ek::MEMBER_OF], None, false),
+                (seed % 2 == 0, vec![], Some(cost.clone()), true),
+            ] {
+                let opts = PlanOptions { steps: 12, fixed_kinds: fixed, protect_target_membership: protect, node_cost, live_first };
+                multi += assert_weighted_same(&g, &zones, &opts, &format!("seed {seed} protect {protect}"));
+            }
+        }
+        assert!(multi > 300, "steps cutting principals off several zones: {multi}");
+    }
+
+    /// One zone of weight 1 gives the single-zone plan.
+    #[test]
+    fn weighted_single_zone_is_plan() {
+        for seed in 0..100u64 {
+            let n = 30 + (seed * 53 % 400) as u32;
+            let g = random_graph(n, n as usize * 3, 2, 300 + seed);
+            let t = g.nodes_with_flag(flags::TIER0);
+            let opts = PlanOptions { steps: 15, protect_target_membership: seed % 2 == 0, ..Default::default() };
+            let a = plan(&g, &t, &opts, &Cancel::never());
+            let b = plan_weighted(&g, &[WeightedZone { weight: 1, targets: &t }], &opts, &Cancel::never());
+            assert_eq!(a.baseline, b.baseline);
+            let sa: Vec<_> = a.steps.iter().map(|s| (s.node, s.edges.clone(), s.principals_cut, s.exposed_after)).collect();
+            let sb: Vec<_> = b.steps.iter().map(|s| (s.node, s.edges.clone(), s.score, s.score_after)).collect();
+            assert_eq!(sa, sb, "seed {seed}");
+        }
+        // Larger graph (parallel paths) with two zones: deterministic and in range.
+        let g = random_graph(60_000, 180_000, 5, 77);
+        let t = g.nodes_with_flag(flags::TIER0);
+        let other: Vec<u32> = (0..40).map(|i| i * 13).collect();
+        let zs = [WeightedZone { weight: 5, targets: &t }, WeightedZone { weight: 2, targets: &other }];
+        let opts = PlanOptions { steps: 8, protect_target_membership: true, ..Default::default() };
+        let a = plan_weighted(&g, &zs, &opts, &Cancel::never());
+        let b = plan_weighted(&g, &zs, &opts, &Cancel::never());
+        assert_eq!(a.steps.iter().map(|s| (s.node, s.score)).collect::<Vec<_>>(), b.steps.iter().map(|s| (s.node, s.score)).collect::<Vec<_>>());
+        assert!(a.steps.windows(2).all(|w| w[0].score_after > w[1].score_after));
+        let mut left = a.baseline;
+        for s in &a.steps {
+            assert_eq!(s.score, 5 * s.zones[0].principals_cut + 2 * s.zones[1].principals_cut);
+            left -= s.score;
+            assert_eq!(left, s.score_after);
+        }
+        let c = Cancel::never();
+        c.cancel();
+        assert!(plan_weighted(&g, &zs, &opts, &c).truncated);
     }
 
     #[test]

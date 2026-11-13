@@ -91,7 +91,7 @@ On the canvas:
 - Search for any object in the top bar. Click a node for its details and all collector
   properties.
 - Right-click a node to expand inbound or outbound edges, set it as path start or end,
-  mark it owned or Tier Zero, or remove it in a simulation.
+  mark it owned or Tier Zero, add it to a zone, or remove it in a simulation.
 - Derived edges (DCSync, ADCS ESC*, CoerceToTGT, hybrid sync, Entra role edges) have
   **How was this derived?**, which draws the collected edges and the facts the rule used.
 - **Table** lists everything on the canvas; **Export PNG**, **Export JSON** / **Import**
@@ -141,6 +141,10 @@ Open a finding to see its items, guidance and history across snapshots. From the
   cumulative curve is exact. It never proposes removing admins from admin groups. Objects
   with the `fix_cost` property are skipped (`fixed`) or flagged as needing a maintenance
   window (`window`); see [OT.md](OT.md#fix-cost).
+  - **All zones, by weight** plans for every zone at once. Give each zone a weight
+    (**Plan weight** on its page, or in the planner for one plan); each step then cuts the
+    most weighted exposure, so a fix that protects Tier Zero and the finance servers beats
+    one that protects only a low-weight zone. The step shows what it cuts per zone.
 - **Hand off…** turns the fix list, a whole plan or one step into:
   - a PowerShell script with one suggested command per edge;
   - Jira issues, ServiceNow records or signed webhook events.
@@ -154,6 +158,11 @@ servers", defined by a CHQL selector. Each zone gets its own exposure, choke poi
 plan. On the **Review** tab, certify the members that belong and revoke the ones the rule
 picked up by mistake; revoked members leave the zone. **Start from a template** offers
 OT zones (Purdue levels, engineering workstations, OT DMZ); see [OT.md](OT.md).
+
+To add objects without writing a query, right-click one on the canvas (or use the
+details drawer) → **Add to zone…**, and pick a zone or start a new one. Objects added by
+hand stay in the zone whatever the selector matches and count as certified; a zone can
+consist of hand-added objects only. Remove them on the zone's **Members** tab.
 
 ## Posture and alerts
 
@@ -180,9 +189,10 @@ or a webhook after an ingest. Alerts can fire when:
 - executive summary;
 - findings with guidance;
 - exposure and choke points;
-- optionally, the first steps of the remediation plan.
+- optionally, the first steps of the remediation plan;
+- with custom zones, exposure per zone and a plan across all zones by weight.
 
-It is also available from the CLI (`copperhound report`) and the API.
+It is also available from the CLI (`copperhound report`, with `--zone` for zones) and the API.
 
 ## Administration
 

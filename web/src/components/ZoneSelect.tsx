@@ -3,7 +3,7 @@ import { useZones } from "../state/ZonesContext";
 /** Zone dropdown (built-in Tier Zero first). */
 export function ZoneSelect({ value, onChange, id, label = "Zone" }: { value: string; onChange: (id: string) => void; id?: string; label?: string }) {
   const { zones } = useZones();
-  const list = zones.length > 0 ? zones : [{ id: "tier0", name: "Tier Zero", member_count: 0, builtin: true }];
+  const list = zones.length > 0 ? zones : [{ id: "tier0", name: "Tier Zero", member_count: 0, builtin: true, weight: 1 }];
   return (
     <select id={id} aria-label={id ? undefined : label} value={value} onChange={(e) => onChange(e.target.value)}>
       {list.map((z) => (

@@ -44,6 +44,8 @@ import {
   computingProgress,
   deleteSnapshot,
   deleteZone,
+  setZoneWeight,
+  zoneObjects,
   findingDetail,
   acceptances,
   findingsResponse,
@@ -430,6 +432,21 @@ function routeV12(
       return zoneFail(e);
     }
   }
+  if (method === "POST" && (m = /^\/zones\/([^/]+)\/objects$/.exec(p))) {
+    try {
+      return ok(zoneObjects(decodeURIComponent(m[1]!), (body ?? {}) as { add?: string[]; remove?: string[] }));
+    } catch (e) {
+      return zoneFail(e);
+    }
+  }
+  if (method === "PUT" && (m = /^\/zones\/([^/]+)\/weight$/.exec(p))) {
+    try {
+      return ok(setZoneWeight(decodeURIComponent(m[1]!), (body as { weight?: unknown } | undefined)?.weight));
+    } catch (e) {
+      if (e instanceof ZoneError) return fail(e.message.includes("not found") ? 404 : 400, e.message);
+      throw e;
+    }
+  }
   if (method === "GET" && (m = /^\/zones\/([^/]+)\/members$/.exec(p))) {
     const members = zoneMembers(decodeURIComponent(m[1]!));
     if (!members) return fail(404, "zone not found");
@@ -506,8 +523,13 @@ function routeV12(
     return r ? ok(r) : fail(404, "zone not found");
   }
   if (method === "POST" && p === "/remediation-plan") {
-    const r = remediationPlan((body ?? {}) as PlanRequest);
-    return r ? ok(r) : fail(404, "zone not found");
+    try {
+      const r = remediationPlan((body ?? {}) as PlanRequest);
+      return r ? ok(r) : fail(404, "zone not found");
+    } catch (e) {
+      if (e instanceof ZoneError) return fail(400, e.message);
+      throw e;
+    }
   }
   if (method === "GET" && p === "/posture") return ok(posture());
   if (method === "GET" && p === "/posture/diff") {

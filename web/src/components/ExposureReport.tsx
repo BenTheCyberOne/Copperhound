@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ChokePoint, ExposureRow, Tier0Report } from "../api/types";
 import { kindShort } from "../graph/kinds";
 import { EdgeKindLabel } from "./EdgeHelp";
@@ -11,9 +12,14 @@ export const chokeKey = (cp: ChokePoint) => `${cp.src.id}|${cp.kind}|${cp.dst.id
 export function ExposureBars({ rows, after, label }: { rows: ExposureRow[]; after?: ExposureRow[]; label: string }) {
   const afterBy = new Map((after ?? []).map((r) => [r.kind, r]));
   // In before/after comparisons, kinds that were never exposed are just noise.
-  const sorted = [...rows].filter((r) => r.total > 0 && (!after || r.with_path > 0)).sort((a, b) => pct(b.with_path, b.total) - pct(a.with_path, a.total));
-  if (sorted.length === 0) return <p className="muted small-text">No principals.</p>;
+  const [showUnexposed, setShowUnexposed] = useState(false);
+  const all = [...rows].filter((r) => r.total > 0 && (!after || r.with_path > 0)).sort((a, b) => pct(b.with_path, b.total) - pct(a.with_path, a.total));
+  // Kinds with no path at all are listed in one line unless expanded.
+  const unexposed = after ? [] : all.filter((r) => r.with_path === 0);
+  const sorted = showUnexposed || unexposed.length < 2 ? all : all.filter((r) => r.with_path > 0);
+  if (all.length === 0) return <p className="muted small-text">No principals.</p>;
   return (
+    <>
     <ul className="bars" aria-label={label}>
       {sorted.map((row) => {
         const p = pct(row.with_path, row.total);
@@ -47,6 +53,15 @@ export function ExposureBars({ rows, after, label }: { rows: ExposureRow[]; afte
         );
       })}
     </ul>
+    {unexposed.length >= 2 && (
+      <p className="muted small-text">
+        {showUnexposed ? "" : `No path from ${unexposed.length} kinds: ${unexposed.map((r) => kindShort(r.kind)).join(", ")}. `}
+        <button type="button" className="link-btn" onClick={() => setShowUnexposed((x) => !x)} aria-expanded={showUnexposed}>
+          {showUnexposed ? "Hide kinds with no path" : "Show them"}
+        </button>
+      </p>
+    )}
+    </>
   );
 }
 

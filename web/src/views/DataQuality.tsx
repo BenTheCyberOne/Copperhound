@@ -36,7 +36,21 @@ export function DataQuality({ generation }: { generation: number | null }) {
   }, [generation]);
   if (error) return null;
   if (!q || (q.domains.length === 0 && q.tenants.length === 0)) return null;
-  const warnings = [...q.domains, ...q.tenants].flatMap((x) => x.warnings.map((w) => ({ name: x.name, w })));
+  // Tenants can share a display name: label them with the start of their id.
+  const tenantNames = new Map<string, number>();
+  for (const t of q.tenants) tenantNames.set(t.name, (tenantNames.get(t.name) ?? 0) + 1);
+  const label = (x: { name: string; objectid: string; type: string }) =>
+    x.type === "tenant" && (tenantNames.get(x.name) ?? 0) > 1 ? `${x.name} (${x.objectid.slice(0, 8)})` : x.name;
+  // One entry per warning code: the facts per domain / tenant, then the advice once.
+  const groups = new Map<string, { code: string; items: { name: string; fact: string }[] }>();
+  for (const x of [...q.domains, ...q.tenants]) {
+    x.warnings.forEach((w, i) => {
+      const code = x.warning_codes?.[i] ?? w;
+      const g = groups.get(code) ?? { code, items: [] };
+      g.items.push({ name: label(x), fact: w });
+      groups.set(code, g);
+    });
+  }
   return (
     <section className="card data-quality">
       <h2>Data quality</h2>
@@ -94,7 +108,7 @@ export function DataQuality({ generation }: { generation: number | null }) {
           <tbody>
             {q.tenants.map((t) => (
               <tr key={t.objectid}>
-                <td>{t.name}</td>
+                <td title={t.objectid}>{label(t)}</td>
                 <td className="num">{t.users.toLocaleString()}</td>
                 <td className="num">{t.groups.toLocaleString()}</td>
                 <td className="num">
@@ -113,14 +127,28 @@ export function DataQuality({ generation }: { generation: number | null }) {
           </tbody>
         </table>
       )}
-      {warnings.length > 0 && (
+      {groups.size > 0 && (
         <ul className="plain-list quality-warnings">
-          {warnings.map(({ name, w }) => (
-            <li key={name + w} className="warn-text small-text">
-              ⚠ <strong>{name}</strong>: {w}
+          {[...groups.values()].map((g) => (
+            <li key={g.code} className="small-text">
+              <div className="warn-text">
+                ⚠{" "}
+                {g.items.map((it, i) => (
+                  <span key={it.name + i}>
+                    {i > 0 && " · "}
+                    <strong>{it.name}</strong>: {it.fact}
+                  </span>
+                ))}
+              </div>
+              {q.advice?.[g.code] && <div className="muted">{q.advice[g.code]}</div>}
             </li>
           ))}
         </ul>
+      )}
+      {(q.unknown_objects ?? 0) > 0 && (
+        <p className="muted small-text">
+          <strong>{q.unknown_objects!.toLocaleString()}</strong> objects of unknown kind. {q.advice?.unknown}
+        </p>
       )}
     </section>
   );

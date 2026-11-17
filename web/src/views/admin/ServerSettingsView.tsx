@@ -325,8 +325,8 @@ export function ServerSettingsView() {
         <div>
           <h1>Server settings</h1>
           <p className="muted">
-            Analysis options, how multiple dumps are merged, and automatic ingest from a watch folder: drop collector output (.json / .zip, LDIF or AD
-            Explorer snapshots) there, for example from a scheduled SharpHound task, and CopperHound imports it and rebuilds
+            Analysis options, how multiple dumps are merged, and automatic ingest from a watch folder: drop collector output (.json / .zip, LDIF, AD
+            Explorer snapshots or logon data .csv) there, for example from a scheduled SharpHound task, and CopperHound imports it and rebuilds
             the graph.
           </p>
         </div>

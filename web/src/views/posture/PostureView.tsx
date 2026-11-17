@@ -72,7 +72,7 @@ export function PostureView({ route }: { route: Route }) {
                 title="Exposure — share of principals with a path to Tier Zero"
                 mode="area"
                 yMax={100}
-                formatY={(v) => `${Math.round(v * 10) / 10}%`}
+                formatY={(v) => `${v > 0 && v < 1 ? Number(v.toPrecision(2)) : Math.round(v * 10) / 10}%`}
                 xLabels={labels}
                 series={[{ key: "exp", label: "Exposure", color: "var(--accent-strong)", values: snaps.map((s) => s.exposure_percent) }]}
               />

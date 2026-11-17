@@ -369,10 +369,10 @@ export function GraphCanvas({
           onClick={() => sigmaRef.current && exportPng(sigmaRef.current, view.current.colors.background)}
           disabled={empty}
         >
-          Export PNG
+          <span className="tb-long">Export </span>PNG
         </button>
         <button type="button" onClick={() => downloadCanvas(store)} disabled={empty} title="Save the canvas (objects, relationships and positions) as JSON">
-          Export JSON
+          <span className="tb-long">Export </span>JSON
         </button>
         <button type="button" onClick={() => importInput.current?.click()} title="Load a canvas saved with Export JSON (re-resolved against the current graph)">
           Import
@@ -410,7 +410,7 @@ export function GraphCanvas({
         </button>
         <label className="toggle" title="When on, query and path results replace the canvas instead of merging into it">
           <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} />
-          Replace on load
+          Replace<span className="tb-long"> on load</span>
         </label>
         <span className="muted canvas-count">
           {g.order} nodes · {g.size} edges{hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}

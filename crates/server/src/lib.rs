@@ -178,8 +178,24 @@ pub fn router(st: Arc<AppState>) -> Router {
         let index = web.join("index.html");
         // `fallback` (not `not_found_service`) so client-side routes get 200 + index.html.
         app = app.fallback_service(ServeDir::new(web).fallback(ServeFile::new(index)));
+        app = app.layer(axum::middleware::from_fn(web_cache_headers));
     }
     app.layer(CompressionLayer::new()).layer(TraceLayer::new_for_http()).with_state(st)
+}
+
+/// Cache rules for the web UI: build assets have content-hashed names, so they
+/// can be cached for good; everything else (index.html, client-side routes)
+/// is revalidated on every load, so an upgrade shows without a hard refresh.
+/// API responses are left alone.
+async fn web_cache_headers(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::http::header::{HeaderValue, CACHE_CONTROL};
+    let path = req.uri().path().to_owned();
+    let mut res = next.run(req).await;
+    if !path.starts_with("/api/") && !res.headers().contains_key(CACHE_CONTROL) {
+        let v = if path.starts_with("/assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
+        res.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static(v));
+    }
+    res
 }
 
 pub async fn serve(cfg: ServerConfig) -> Result<()> {

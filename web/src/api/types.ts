@@ -347,6 +347,8 @@ export interface QualityDomain {
   age_days: number | null;
   sources: number;
   warnings: string[];
+  /** One code per warning (keys of QualityResponse.advice). */
+  warning_codes?: string[];
 }
 
 export interface QualityTenant {
@@ -370,11 +372,16 @@ export interface QualityTenant {
   age_days: number | null;
   sources: number;
   warnings: string[];
+  warning_codes?: string[];
 }
 
 export interface QualityResponse {
   domains: QualityDomain[];
   tenants: QualityTenant[];
+  /** Objects of unknown kind (referenced, never described). */
+  unknown_objects?: number;
+  /** How to fix each warning code. */
+  advice?: Record<string, string>;
 }
 
 export interface LdapTargetInput {

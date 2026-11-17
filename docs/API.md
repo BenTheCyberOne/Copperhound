@@ -867,15 +867,18 @@ names also resolve), up to 200 per call.
 
 ### Data quality
 
-`GET /quality` → `{"domains": [...], "tenants": [...]}` — per AD domain: users, enabled computers,
+`GET /quality` → `{"domains": [...], "tenants": [...], "unknown_objects", "advice": {code: text}}` — per AD domain: users, enabled computers,
 `session_coverage` (% of enabled computers with `HasSession`), `local_group_coverage` (% with inbound
 `AdminTo` / `CanRDP` / `CanPSRemote` / `ExecuteDCOM`), `acl_coverage` (% of objects whose security
 descriptor was read; `null` when the collector does not say); per Entra tenant: object counts,
 `role_assignments`, `memberships`, `app_owner_coverage`, `device_owner_coverage`, `subscriptions`. Both carry
 `collected_at` (newest source naming the domain / tenant; `collected_at_exact: false` when only the file date
-is known), `age_days`, `sources` and plain-language `warnings` (coverage below 10 % for sessions / local
+is known), `age_days`, `sources`, short plain-language `warnings` (coverage below 10 % for sessions / local
 groups, below 90 % for ACLs, missing role assignments, memberships, owners or subscriptions, data older than
-30 days). Also available on the command line: `copperhound quality <graph>`.
+30 days) and `warning_codes` (one per warning; `sessions`, `local_groups`, `acl`, `stale`, `az_roles`,
+`az_members`, `az_owners`, `az_subscriptions`). `advice` explains how to fix each code, and `unknown` the
+`unknown_objects` count (objects referenced but never described). Also available on the command line:
+`copperhound quality <graph>`.
 
 ---
 

@@ -18,7 +18,7 @@ interface Props {
   series: Series[];
   mode: "line" | "area" | "stacked";
   formatY?: (v: number) => string;
-  /** Fixed y maximum (e.g. 100 for percentages). */
+  /** Upper bound of the y axis (e.g. 100 for percentages); below it the axis fits the data. */
   yMax?: number;
   height?: number;
 }
@@ -63,7 +63,8 @@ export function TimeChart({ title, xLabels, series, mode, formatY = (v) => v.toL
     });
   }, [series, mode, n]);
 
-  const max = yMax ?? niceMax(Math.max(1, ...stacks.flatMap((st) => st.hi)));
+  const dataMax = Math.max(0, ...stacks.flatMap((st) => st.hi));
+  const max = yMax !== undefined ? Math.min(yMax, dataMax > 0 ? niceMax(dataMax) : yMax) : niceMax(Math.max(1, dataMax));
   const x = (i: number) => PAD.left + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const y = (v: number) => PAD.top + innerH - (v / max) * innerH;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => t * max);

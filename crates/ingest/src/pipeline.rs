@@ -67,6 +67,11 @@ pub fn build_graph_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progr
             post.tier0_added += 1;
         }
     }
+    // Members of Tier Zero groups are Tier Zero (after every other rule).
+    for id in crate::postprocess::tier0_members(&graph) {
+        graph.set_flag(id, ch_model::flags::TIER0, true);
+        post.tier0_added += 1;
+    }
     post.secs = t.elapsed().as_secs_f64();
     Ok(Built { graph, ingest: ingest_report, build, post })
 }

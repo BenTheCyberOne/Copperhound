@@ -732,8 +732,13 @@ function routeV14(method: ApiRequest["method"], p: string, num: (k: string, d: n
       tenants: [
         { type: "tenant", id: 1, name: "CORP", objectid: "6c12b0b0-0000-4000-8000-000000000001", users: 5, groups: 2, apps: 2, service_principals: 3, devices: 1, roles: 4,
           role_assignments: 3, memberships: 4, app_owner_coverage: 50, device_owner_coverage: 0, subscriptions: 0, collected_at: "2026-11-04T09:15:02Z", collected_at_exact: false, age_days: 6, sources: 1,
-          warnings: ["No Azure subscriptions: Azure RBAC (resource) paths are not covered — collect with an identity that can read subscriptions."] },
+          warnings: ["No Azure subscriptions."], warning_codes: ["az_subscriptions"] },
       ],
+      unknown_objects: 2,
+      advice: {
+        az_subscriptions: "Azure RBAC (resource) paths are not covered: collect with an identity that can read subscriptions.",
+        unknown: "Objects referenced by SID or id that no collected record describes: principals of domains or forests not collected, deleted objects, or well-known SIDs. Their paths are real, but their kind is unknown.",
+      },
     });
   }
   if (method === "POST" && p === "/database/clear") {
@@ -851,7 +856,7 @@ function routePublic(req: ApiRequest): ApiResponse {
     return ok({
       status: "ok",
       graph_loaded: true,
-      version: "0.3.0-mock",
+      version: "0.4.0-mock",
       generation: state.generation,
       limits: LIMITS,
       snapshot_id: state.snapshotId,

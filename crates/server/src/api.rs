@@ -98,6 +98,19 @@ pub fn node_json(g: &Graph, id: u32) -> Value {
     })
 }
 
+/// `1988978` → `1,988,978`.
+pub(crate) fn thousands(v: u64) -> String {
+    let s = v.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 fn edge_json(g: &Graph, (s, d, k): (u32, u32, u16)) -> Value {
     json!({ "src": s, "dst": d, "kind": g.edge_kind_name(k) })
 }
@@ -1333,10 +1346,8 @@ fn run_ingest_job(st: Arc<AppState>, id: String) {
                 j.state = "done";
                 j.phase = "done";
                 j.percent = 100;
-                j.message = format!(
-                    "ingested {} nodes / {} edges in {:.1}s",
-                    rep["nodes"], rep["edges"], rep["seconds"].as_f64().unwrap_or(0.0)
-                );
+                let n = |k: &str| thousands(rep[k].as_u64().unwrap_or(0));
+                j.message = format!("ingested {} nodes / {} edges in {:.1}s", n("nodes"), n("edges"), rep["seconds"].as_f64().unwrap_or(0.0));
                 j.report = Some(rep);
             }
             Err(e) => {
@@ -1359,4 +1370,15 @@ pub async fn job(State(st): St, Path(id): Path<String>) -> ApiResult {
         .find(|j| j.id == id)
         .map(|j| Json(serde_json::to_value(j).unwrap_or(Value::Null)))
         .ok_or_else(|| ApiError::not_found(format!("no job '{id}'")))
+}
+
+#[cfg(test)]
+mod format_tests {
+    #[test]
+    fn thousands_separators() {
+        assert_eq!(super::thousands(0), "0");
+        assert_eq!(super::thousands(999), "999");
+        assert_eq!(super::thousands(1000), "1,000");
+        assert_eq!(super::thousands(1_988_978), "1,988,978");
+    }
 }

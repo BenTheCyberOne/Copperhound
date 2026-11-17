@@ -5,7 +5,7 @@
       "filter-1": "1:7a66d2f02ced495e",
       "filter-2": "45:c681fb7447b2834e",
       "filter-3": "1:f81fd80d21a3c66d",
-      "filter-4": "5:2c909b3c84da0053",
+      "filter-4": "8:e2fa9838a3de7660",
       "search-S-1-5-21-1000000001-2000000002-3000000003-512": [],
       "search-admin": [
         "ADMINISTRATOR@CORP.LOCAL",
@@ -38,11 +38,12 @@
       "adcs-escalation n=3 cut=0 items=3:00c0af67b4a57cd7",
       "adcs-template-control n=1 cut=0 items=1:a9586ab03ade06d1",
       "asrep-roastable n=1 cut=0 items=1:f81fd80d21a3c66d",
-      "credential-readers n=3 cut=0 items=3:c95b10e6efb49a20",
+      "credential-readers n=2 cut=0 items=2:2274aab7dee85d13",
       "dcsync-non-tier0 n=2 cut=0 items=2:63d7583311d93e75",
       "gpo-control n=1 cut=0 items=1:beeae162786f228d",
       "no-laps n=1 cut=0 items=1:6045a8f8d21e0186",
       "sid-history n=1 cut=0 items=1:f89ac59ff4adbb0f",
+      "tier0-control n=2 cut=0 items=2:f9cf46b6c57a223d",
       "write-gplink n=1 cut=0 items=1:5e45d260fc5d3ca8"
     ],
     "graph": {
@@ -97,13 +98,13 @@
         "Domain": "2:b3bf21b1ff7fcce7",
         "EnterpriseCA": "1:750881c89236b22f",
         "GPO": "2:1169825f577b9c15",
-        "Group": "11:bc3afbc54f8a18c8",
+        "Group": "11:d6be003b294aa672",
         "IssuancePolicy": "1:8e54bf002a5f4ad5",
         "NTAuthStore": "1:31cce51086502474",
         "OU": "2:702857351e33b914",
         "RootCA": "1:04c0af0b627a5052",
-        "Unknown": "2:4ef384bd09dee63d",
-        "User": "6:8aa654de7d0e2dba"
+        "Unknown": "2:4b4ea03323c7820d",
+        "User": "6:7302290b94161311"
       }
     },
     "chql": {
@@ -269,7 +270,7 @@
       "targeted-kerberoast": "0:0000000000000000 truncated=false",
       "template-control": "0:0000000000000000 truncated=false",
       "template-enrollers": "0:0000000000000000 truncated=false",
-      "tier0-by-kind": "8:a3212b0c9d4d09cb truncated=false",
+      "tier0-by-kind": "10:a26483d3759e137c truncated=false",
       "tier0-hosts-other-sessions": "0:0000000000000000 truncated=false",
       "tier0-objects": "0:0000000000000000 truncated=false",
       "tier0-users": "0:0000000000000000 truncated=false",
@@ -307,9 +308,9 @@
     },
     "tier0_per_realm": {
       "by_kind": [
-        "Unknown:1/2",
-        "User:5/6",
-        "Group:3/11",
+        "Unknown:0/2",
+        "User:3/6",
+        "Group:2/11",
         "Computer:0/3",
         "Domain:0/2",
         "GPO:2/2",
@@ -322,18 +323,18 @@
         "NTAuthStore:0/1",
         "IssuancePolicy:0/1"
       ],
-      "choke_points": "10:d44ea9e4f58bc9fa",
-      "exposed_principals": 5,
-      "exposed_set": "5:dc5aabb289c1dcab",
-      "max_depth": 3,
-      "tier0_nodes": 13,
-      "total_principals": 8
+      "choke_points": "5:12cd1b6a02cfe12a",
+      "exposed_principals": 3,
+      "exposed_set": "3:465f99d99f1d0bcf",
+      "max_depth": 2,
+      "tier0_nodes": 17,
+      "total_principals": 6
     },
     "tier0_unified": {
       "by_kind": [
-        "Unknown:1/2",
-        "User:5/6",
-        "Group:3/11",
+        "Unknown:0/2",
+        "User:3/6",
+        "Group:2/11",
         "Computer:0/3",
         "Domain:0/2",
         "GPO:2/2",
@@ -346,12 +347,12 @@
         "NTAuthStore:0/1",
         "IssuancePolicy:0/1"
       ],
-      "choke_points": "10:d44ea9e4f58bc9fa",
-      "exposed_principals": 5,
-      "exposed_set": "5:dc5aabb289c1dcab",
-      "max_depth": 3,
-      "tier0_nodes": 13,
-      "total_principals": 8
+      "choke_points": "5:12cd1b6a02cfe12a",
+      "exposed_principals": 3,
+      "exposed_set": "3:465f99d99f1d0bcf",
+      "max_depth": 2,
+      "tier0_nodes": 17,
+      "total_principals": 6
     }
   },
   "corp-sharphound": {
@@ -360,7 +361,7 @@
       "filter-1": "0:0000000000000000",
       "filter-2": "45:c681fb7447b2834e",
       "filter-3": "0:0000000000000000",
-      "filter-4": "5:2c909b3c84da0053",
+      "filter-4": "8:e2fa9838a3de7660",
       "search-S-1-5-21-1000000001-2000000002-3000000003-512": [],
       "search-admin": [
         "ADMINISTRATOR@CORP.LOCAL",
@@ -393,11 +394,12 @@
       "adcs-escalation n=3 cut=0 items=3:00c0af67b4a57cd7",
       "adcs-template-control n=1 cut=0 items=1:a9586ab03ade06d1",
       "asrep-roastable n=1 cut=0 items=1:f81fd80d21a3c66d",
-      "credential-readers n=3 cut=0 items=3:c95b10e6efb49a20",
+      "credential-readers n=2 cut=0 items=2:2274aab7dee85d13",
       "dcsync-non-tier0 n=2 cut=0 items=2:63d7583311d93e75",
       "gpo-control n=1 cut=0 items=1:beeae162786f228d",
       "no-laps n=1 cut=0 items=1:6045a8f8d21e0186",
       "sid-history n=1 cut=0 items=1:f89ac59ff4adbb0f",
+      "tier0-control n=2 cut=0 items=2:f9cf46b6c57a223d",
       "write-gplink n=1 cut=0 items=1:5e45d260fc5d3ca8"
     ],
     "graph": {
@@ -452,13 +454,13 @@
         "Domain": "2:b3bf21b1ff7fcce7",
         "EnterpriseCA": "1:750881c89236b22f",
         "GPO": "2:1169825f577b9c15",
-        "Group": "11:bc3afbc54f8a18c8",
+        "Group": "11:d6be003b294aa672",
         "IssuancePolicy": "1:8e54bf002a5f4ad5",
         "NTAuthStore": "1:31cce51086502474",
         "OU": "2:702857351e33b914",
         "RootCA": "1:04c0af0b627a5052",
-        "Unknown": "2:4ef384bd09dee63d",
-        "User": "6:8aa654de7d0e2dba"
+        "Unknown": "2:4b4ea03323c7820d",
+        "User": "6:7302290b94161311"
       }
     },
     "chql": {
@@ -624,7 +626,7 @@
       "targeted-kerberoast": "0:0000000000000000 truncated=false",
       "template-control": "0:0000000000000000 truncated=false",
       "template-enrollers": "0:0000000000000000 truncated=false",
-      "tier0-by-kind": "8:a3212b0c9d4d09cb truncated=false",
+      "tier0-by-kind": "10:a26483d3759e137c truncated=false",
       "tier0-hosts-other-sessions": "0:0000000000000000 truncated=false",
       "tier0-objects": "0:0000000000000000 truncated=false",
       "tier0-users": "0:0000000000000000 truncated=false",
@@ -662,9 +664,9 @@
     },
     "tier0_per_realm": {
       "by_kind": [
-        "Unknown:1/2",
-        "User:5/6",
-        "Group:3/11",
+        "Unknown:0/2",
+        "User:3/6",
+        "Group:2/11",
         "Computer:0/3",
         "Domain:0/2",
         "GPO:2/2",
@@ -677,18 +679,18 @@
         "NTAuthStore:0/1",
         "IssuancePolicy:0/1"
       ],
-      "choke_points": "10:d44ea9e4f58bc9fa",
-      "exposed_principals": 5,
-      "exposed_set": "5:dc5aabb289c1dcab",
-      "max_depth": 3,
-      "tier0_nodes": 13,
-      "total_principals": 8
+      "choke_points": "5:12cd1b6a02cfe12a",
+      "exposed_principals": 3,
+      "exposed_set": "3:465f99d99f1d0bcf",
+      "max_depth": 2,
+      "tier0_nodes": 17,
+      "total_principals": 6
     },
     "tier0_unified": {
       "by_kind": [
-        "Unknown:1/2",
-        "User:5/6",
-        "Group:3/11",
+        "Unknown:0/2",
+        "User:3/6",
+        "Group:2/11",
         "Computer:0/3",
         "Domain:0/2",
         "GPO:2/2",
@@ -701,12 +703,12 @@
         "NTAuthStore:0/1",
         "IssuancePolicy:0/1"
       ],
-      "choke_points": "10:d44ea9e4f58bc9fa",
-      "exposed_principals": 5,
-      "exposed_set": "5:dc5aabb289c1dcab",
-      "max_depth": 3,
-      "tier0_nodes": 13,
-      "total_principals": 8
+      "choke_points": "5:12cd1b6a02cfe12a",
+      "exposed_principals": 3,
+      "exposed_set": "3:465f99d99f1d0bcf",
+      "max_depth": 2,
+      "tier0_nodes": 17,
+      "total_principals": 6
     }
   },
   "synth-100k": {
@@ -715,7 +717,7 @@
       "filter-1": "47628:37c911e7dcd403d3",
       "filter-2": "69997:e3545341333932e3",
       "filter-3": "3057:8599f8c26283659b",
-      "filter-4": "8:69a0794d9c24dbb1",
+      "filter-4": "89:8dc869a6ace6e65e",
       "search-S-1-5-21-1000000001-2000000002-3000000003-512": [
         "DOMAIN ADMINS@SYNTH.LOCAL"
       ],
@@ -769,10 +771,11 @@
       "coerce-to-tgt n=693 cut=76 items=693:23c2664bf52aaa95",
       "dcsync-non-tier0 n=1 cut=0 items=1:6905079b8c5a5827",
       "entra-connect-admins n=1 cut=0 items=1:cd254adcc7bc0ae5",
+      "kerberoastable-privileged n=2 cut=0 items=2:6dd603ec0a39f719",
       "legacy-os n=2716 cut=0 items=2716:51735478fc3faec6",
       "no-laps n=7630 cut=0 items=7630:ce50ee2d88e149a7",
       "privileged-sessions n=401 cut=123 items=401:9195571610531bbf",
-      "tier0-control n=1 cut=0 items=1:cd254adcc7bc0ae5",
+      "tier0-control n=2 cut=0 items=2:f095e28b9e23a5b7",
       "trust-sid-filtering n=2 cut=0 items=2:b23829b3b8beaea0",
       "trust-tgt-delegation n=2 cut=0 items=2:2e6a63c488a4994f"
     ],
@@ -816,8 +819,8 @@
         "AZUser": "10002:c9d3800b118a8c3a",
         "Computer": "20001:9fc88f0b44f5ce52",
         "Domain": "4:d3ed7e7880000c1f",
-        "Group": "5005:74cf974e4659ccdf",
-        "User": "100000:0fe06f2535753bbf"
+        "Group": "5005:49b7983930263a45",
+        "User": "100000:9bcfcbae9abf1e6c"
       }
     },
     "chql": {
@@ -983,7 +986,7 @@
       "targeted-kerberoast": "0:0000000000000000 truncated=false",
       "template-control": "0:0000000000000000 truncated=false",
       "template-enrollers": "0:0000000000000000 truncated=false",
-      "tier0-by-kind": "7:0e38f6d7484a22fe truncated=false",
+      "tier0-by-kind": "7:cb4dd2e69118b025 truncated=false",
       "tier0-hosts-other-sessions": "0:0000000000000000 truncated=false",
       "tier0-objects": "0:0000000000000000 truncated=false",
       "tier0-users": "0:0000000000000000 truncated=false",
@@ -1026,8 +1029,8 @@
     },
     "tier0_per_realm": {
       "by_kind": [
-        "User:99882/100000",
-        "Group:4971/5005",
+        "User:99807/100000",
+        "Group:4965/5005",
         "Computer:13482/20001",
         "Domain:0/4",
         "AZTenant:0/1",
@@ -1035,17 +1038,17 @@
         "AZGroup:1/1",
         "AZRole:1/3"
       ],
-      "choke_points": "25:02e97598c74b7842",
-      "exposed_principals": 113366,
-      "exposed_set": "113366:829c095bcd94c42f",
+      "choke_points": "25:f8750529582190db",
+      "exposed_principals": 113291,
+      "exposed_set": "113291:b8c3228e9afa26c3",
       "max_depth": 11,
-      "tier0_nodes": 18,
-      "total_principals": 129995
+      "tier0_nodes": 99,
+      "total_principals": 129920
     },
     "tier0_unified": {
       "by_kind": [
-        "User:99882/100000",
-        "Group:4971/5005",
+        "User:99807/100000",
+        "Group:4965/5005",
         "Computer:13482/20001",
         "Domain:0/4",
         "AZTenant:0/1",
@@ -1053,12 +1056,12 @@
         "AZGroup:1/1",
         "AZRole:1/3"
       ],
-      "choke_points": "25:43900b8027b0bbf0",
-      "exposed_principals": 123352,
-      "exposed_set": "123352:de8b795b71d65732",
+      "choke_points": "25:e4a0f91a293e728e",
+      "exposed_principals": 123277,
+      "exposed_set": "123277:b1b05d848710b75e",
       "max_depth": 11,
-      "tier0_nodes": 18,
-      "total_principals": 129995
+      "tier0_nodes": 99,
+      "total_principals": 129920
     }
   },
   "synth-3k": {
@@ -1067,7 +1070,7 @@
       "filter-1": "1434:d5a04d5e93d9fece",
       "filter-2": "2097:c58d0d8f21a04363",
       "filter-3": "92:c7f3033608439c64",
-      "filter-4": "8:e80b4c68ec1d691c",
+      "filter-4": "94:0f140bd5aa34f152",
       "search-S-1-5-21-1000000001-2000000002-3000000003-512": [
         "DOMAIN ADMINS@SYNTH.LOCAL"
       ],
@@ -1121,10 +1124,11 @@
       "coerce-to-tgt n=24 cut=2 items=24:ac0df853d19ceab2",
       "dcsync-non-tier0 n=1 cut=0 items=1:afca3ccc68e1a102",
       "entra-connect-admins n=1 cut=0 items=1:397e91b932389a07",
+      "kerberoastable-privileged n=6 cut=0 items=6:944257957d5549e1",
       "legacy-os n=72 cut=0 items=72:240e498ad5dcc7e1",
       "no-laps n=221 cut=0 items=221:99941a06c7e04bd9",
       "privileged-sessions n=11 cut=1 items=11:f213f4d23fd87966",
-      "tier0-control n=1 cut=0 items=1:397e91b932389a07",
+      "tier0-control n=3 cut=0 items=3:fb8b013c83d624a1",
       "trust-sid-filtering n=2 cut=0 items=2:b23829b3b8beaea0",
       "trust-tgt-delegation n=2 cut=0 items=2:2e6a63c488a4994f"
     ],
@@ -1168,8 +1172,8 @@
         "AZUser": "302:3c4f1c9cd3f8544a",
         "Computer": "601:96c615bbbe1361e1",
         "Domain": "4:d3ed7e7880000c1f",
-        "Group": "155:d4f1e26026384c8d",
-        "User": "3000:4a5f229783032ab3"
+        "Group": "155:a927b07f9b1dee11",
+        "User": "3000:604b923ea3f55193"
       }
     },
     "chql": {
@@ -1335,7 +1339,7 @@
       "targeted-kerberoast": "0:0000000000000000 truncated=false",
       "template-control": "0:0000000000000000 truncated=false",
       "template-enrollers": "0:0000000000000000 truncated=false",
-      "tier0-by-kind": "7:0e38f6d7484a22fe truncated=false",
+      "tier0-by-kind": "7:0d49f708587b415c truncated=false",
       "tier0-hosts-other-sessions": "0:0000000000000000 truncated=false",
       "tier0-objects": "0:0000000000000000 truncated=false",
       "tier0-users": "0:0000000000000000 truncated=false",
@@ -1378,8 +1382,8 @@
     },
     "tier0_per_realm": {
       "by_kind": [
-        "User:2999/3000",
-        "Group:145/155",
+        "User:2919/3000",
+        "Group:139/155",
         "Computer:393/601",
         "Domain:0/4",
         "AZTenant:0/1",
@@ -1387,17 +1391,17 @@
         "AZGroup:1/1",
         "AZRole:1/3"
       ],
-      "choke_points": "25:9f99f0a998a96414",
-      "exposed_principals": 3394,
-      "exposed_set": "3394:9cde8b46e01189e8",
+      "choke_points": "25:6597b939c87c1681",
+      "exposed_principals": 3314,
+      "exposed_set": "3314:0e94b865d3afc459",
       "max_depth": 9,
-      "tier0_nodes": 18,
-      "total_principals": 3895
+      "tier0_nodes": 104,
+      "total_principals": 3815
     },
     "tier0_unified": {
       "by_kind": [
-        "User:2999/3000",
-        "Group:145/155",
+        "User:2919/3000",
+        "Group:139/155",
         "Computer:393/601",
         "Domain:0/4",
         "AZTenant:0/1",
@@ -1405,12 +1409,12 @@
         "AZGroup:1/1",
         "AZRole:1/3"
       ],
-      "choke_points": "25:e40fe97f9b9dbbe0",
-      "exposed_principals": 3691,
-      "exposed_set": "3691:127d68af42010965",
+      "choke_points": "25:b9de98ba605b9029",
+      "exposed_principals": 3611,
+      "exposed_set": "3611:908b13ac04364fb5",
       "max_depth": 10,
-      "tier0_nodes": 18,
-      "total_principals": 3895
+      "tier0_nodes": 104,
+      "total_principals": 3815
     }
   }
 }

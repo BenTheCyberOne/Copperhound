@@ -4,6 +4,11 @@ import { Section } from "./Section";
 
 const LONG = 140;
 
+/** No value: null, missing or an empty string / list. */
+function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+}
+
 function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "null";
   if (typeof v === "string") return v;
@@ -58,12 +63,16 @@ interface Props {
 export function PropertySections({ properties, adcsObject, isOpen, toggle, overviewExtra, afterOverview }: Props) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<Sort>("key-asc");
+  const [showEmpty, setShowEmpty] = useState(false);
+  const emptyCount = useMemo(() => Object.values(properties).filter(isEmpty).length, [properties]);
 
   const grouped = useMemo(() => {
     const f = filter.trim().toLowerCase();
     const groups = new Map<SectionId, [string, unknown][]>(SECTIONS.map((s) => [s.id, []]));
     for (const [k, v] of Object.entries(properties)) {
       if (f && !k.toLowerCase().includes(f) && !formatValue(v).toLowerCase().includes(f)) continue;
+      // Empty values are hidden unless asked for, or named by the filter.
+      if (isEmpty(v) && !showEmpty && !(f && k.toLowerCase().includes(f))) continue;
       groups.get(sectionOf(k, adcsObject))!.push([k, v]);
     }
     const cmp = (a: [string, unknown], b: [string, unknown]) => {
@@ -72,7 +81,7 @@ export function PropertySections({ properties, adcsObject, isOpen, toggle, overv
     };
     for (const rows of groups.values()) rows.sort(cmp);
     return groups;
-  }, [properties, adcsObject, filter, sort]);
+  }, [properties, adcsObject, filter, sort, showEmpty]);
 
   return (
     <div className="props">
@@ -91,6 +100,11 @@ export function PropertySections({ properties, adcsObject, isOpen, toggle, overv
           <option value="value">By value</option>
         </select>
       </div>
+      {emptyCount > 0 && (
+        <button type="button" className="link-btn small-text props-empty-toggle" onClick={() => setShowEmpty((x) => !x)} aria-pressed={showEmpty}>
+          {showEmpty ? `Hide ${emptyCount} empty` : `Show ${emptyCount} empty`}
+        </button>
+      )}
       {SECTIONS.map((s) => {
         const rows = grouped.get(s.id)!;
         if (rows.length === 0 && s.id !== "overview") return null;

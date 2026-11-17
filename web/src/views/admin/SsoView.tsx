@@ -202,13 +202,15 @@ export function SsoView() {
     <div className="view-page">
       <header className="view-head">
         <div>
-          <h1>Single sign-on</h1>
+          <h1 className="row gap">
+            Single sign-on
+            <span className={`tag ${data.config.enabled ? "ok" : "off"}`}>{data.config.enabled ? "enabled" : "off"}</span>
+          </h1>
           <p className="muted">
             OpenID Connect sign-in (Entra ID, Okta, Keycloak, Google …). Accounts are created on first sign-in and get their role
             from the IdP's groups or roles on every sign-in.
           </p>
         </div>
-        <span className={`tag ${data.config.enabled ? "ok" : "off"}`}>{data.config.enabled ? "enabled" : "off"}</span>
       </header>
 
       <div className="data-grid">

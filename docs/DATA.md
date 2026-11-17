@@ -163,7 +163,13 @@ ADCS infrastructure (CAs, NTAuth store, templates, CA hosts, Cert Publishers),
 Azure tenants and the Global Admin / Privileged Role Admin / Privileged Auth
 Admin / Partner Tier2 / Hybrid Identity Admin / Directory Synchronization
 Accounts roles, Entra Connect sync accounts and server, AZUREADSSOACC, and
-legacy `highvalue`. AD and Entra Tier Zero form one target set by default
+legacy `highvalue`, plus every transitive member (`MemberOf` / `AZMemberOf`) of
+those: a member of Domain Admins holds its rights, so it is Tier Zero, not an
+exposed principal. Membership is not followed through broad built-in groups
+(Domain Users, Domain Computers, Domain Guests, Authenticated Users, Everyone,
+BUILTIN\Users and BUILTIN\Guests); such a nesting stays visible as exposure.
+Membership is applied at ingest: marking a group Tier Zero in the UI does not
+mark its members until the next rebuild. AD and Entra Tier Zero form one target set by default
 (setting `analysis.unified_tier0`). Tier Zero and owned marks can be added or
 removed in the UI and persist across re-ingest.
 

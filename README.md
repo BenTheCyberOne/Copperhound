@@ -4,8 +4,9 @@
 
 Open-source Active Directory, ADCS and Entra ID / Azure attack-path analysis,
 built in Rust for very large environments. CopperHound ingests SharpHound,
-bloodhound-python, ldapdomaindump and AzureHound output, raw LDIF dumps and
-Sysinternals AD Explorer snapshots into a memory-mapped graph store and runs
+bloodhound-python, ldapdomaindump and AzureHound output, raw LDIF dumps,
+Sysinternals AD Explorer snapshots and Windows / Defender logon data into a
+memory-mapped graph store and runs
 path, exposure and CHQL queries directly on it, with no graph database. One
 container serves the web UI and REST API.
 
@@ -54,13 +55,24 @@ and single sign-on (OpenID Connect, SAML 2.0): [docs/DEPLOYMENT.md](docs/DEPLOYM
 
 Computed in the background after every ingest:
 
-- **Attack-path findings** — 42 finding types across AD, ADCS, Entra ID,
+- **Attack-path findings** — 50 finding types across AD, ADCS, Entra ID,
   hybrid and OT (DCSync outside Tier Zero, control of Tier Zero, rights of broad groups,
-  delegation to Tier Zero, ESC escalations, tenant-takeover Graph permissions,
+  delegation to Tier Zero, ESC escalations, NTLM relay, tenant-takeover Graph permissions,
   synced accounts holding Entra Tier Zero roles, …), each with severity,
   impact, remediation guidance and MITRE ATT&CK techniques. Every edge finding
   is **measured**: "fixing this removes N principals' paths to Tier Zero",
   computed by re-running the exposure analysis without its edges.
+- **NTLM relay** — coercion-and-relay paths to SMB, LDAP, LDAPS and AD CS
+  (ESC8 web enrollment, ESC11 RPC), modelled like BloodHound CE, plus ESC14 and
+  ESC16. The built-in LDAP collector can optionally probe SMB signing, DC LDAP
+  signing and AD CS web enrollment itself.
+- **Sessions from logon data** — where SharpHound cannot see sessions, upload
+  Security event 4624 exports (`scripts/Export-CopperHoundLogons.ps1`) or Defender
+  XDR `DeviceLogonEvents`. Every session records when it was first and last
+  seen; old ones can age out.
+- **Cost-aware paths** — besides the fewest hops, find the path that takes the
+  least effort or is least likely to be noticed (session age counts), and rank
+  the principals with the cheapest route to Tier Zero.
 - **What-if simulation** — remove any set of edges, edge kinds or nodes (or add
   targets) and see before/after exposure per kind, instantly.
 - **Remediation planner** — a dominator tree over every attack path finds the
@@ -201,6 +213,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the road
 
 Each version, in short; the details are in [CHANGELOG.md](CHANGELOG.md).
 
+- **0.4.0** (2026-11-17): NTLM relay, sessions from logon data and cost-aware paths.
+  - NTLM relay edges (SMB, LDAP, LDAPS, AD CS web and RPC enrollment), ESC16,
+    ESC14 and more AD edges, with opt-in network probes in the LDAP collector.
+  - Sessions from Windows logon events or Defender XDR, with first / last seen
+    times and a maximum session age.
+  - Paths by least effort or stealth, and the cheapest routes to Tier Zero.
+  - Members of Tier Zero groups now count as Tier Zero; UI and data quality
+    fixes.
 - **0.3.0** (2026-11-13): zone weights and cross-zone planning.
   - Weight each zone, and the remediation planner ranks fixes by weighted
     exposure across all zones at once; reports gain a zone section.

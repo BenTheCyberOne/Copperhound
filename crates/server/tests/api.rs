@@ -761,6 +761,9 @@ async fn database_clear() {
     assert!(d["session_coverage"].as_f64().unwrap() > 0.0, "{d}");
     assert!(d["sources"].as_u64().unwrap() > 0);
     assert!(q["tenants"].is_array());
+    assert_eq!(d["warnings"].as_array().unwrap().len(), d["warning_codes"].as_array().unwrap().len());
+    assert!(q["advice"]["sessions"].as_str().is_some());
+    assert!(q["unknown_objects"].is_u64());
 
     let (_, v) = call(&app, get("/api/v1/search?q=USER1@&limit=1", t)).await;
     let id = v[0]["id"].as_u64().unwrap();
@@ -1346,8 +1349,9 @@ async fn path_costs_api() {
     std::env::set_var("COPPERHOUND_ADMIN_PASSWORD", "test-password");
     let d = "S-1-5-21-5-5-5";
     let wrap = |ty: &str, data: Value| json!({"data": data, "meta": {"type": ty, "count": 1, "version": 6}}).to_string();
-    // alice → DA two ways, two hops each: ForceChangePassword on an admin
-    // (loud), or GenericAll on a group that is a member of DA (quiet).
+    // alice → Tier Zero two ways, one hop each: ForceChangePassword on a DA
+    // member (loud), or GenericAll on a group nested in DA (quiet). Members of
+    // DA are Tier Zero themselves.
     let user = |rid: u32, name: &str| json!({"ObjectIdentifier": format!("{d}-{rid}"), "Properties": {"name": name, "enabled": true}, "Aces": []});
     let ace = |rid: u32, right: &str| json!({"PrincipalSID": format!("{d}-{rid}"), "PrincipalType": "User", "RightName": right, "IsInherited": false});
     let mut admin = user(1102, "ADMIN@CORP.LOCAL");
@@ -1376,10 +1380,10 @@ async fn path_costs_api() {
     let body = |cost: Option<&str>| json!({"from": "ALICE@CORP.LOCAL", "to_tier0": true, "cost": cost});
     let (s, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(None))).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(kinds(&v).len(), 2, "both routes are two hops");
+    assert_eq!(kinds(&v).len(), 1, "both routes are one hop");
     let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("stealth")))).await;
-    assert_eq!(kinds(&v), ["GenericAll", "MemberOf"], "a password reset is loud");
-    assert_eq!(v["cost"], json!({"profile": "stealth", "total": 2, "hop_costs": [2, 0]}));
+    assert_eq!(kinds(&v), ["GenericAll"], "a password reset is loud");
+    assert_eq!(v["cost"], json!({"profile": "stealth", "total": 2, "hop_costs": [2]}));
     let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("effort")))).await;
     assert_eq!(v["cost"]["total"], 1);
     let (s, _) = call(&app, json_req("POST", "/api/v1/path", Some(t), json!({"from": "ALICE@CORP.LOCAL", "to_tier0": true, "cost": "speed"}))).await;
@@ -1389,20 +1393,46 @@ async fn path_costs_api() {
     let (s, v) = call(&app, json_req("PUT", "/api/v1/path-costs", Some(t), json!({"stealth": {"GenericAll": 20}}))).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("stealth")))).await;
-    assert_eq!(kinds(&v), ["ForceChangePassword", "MemberOf"]);
+    assert_eq!(kinds(&v), ["ForceChangePassword"]);
     let (s, _) = call(&app, json_req("PUT", "/api/v1/path-costs", Some(t), json!({"stealth": {"GenericAll": 5000}}))).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (_, v) = call(&app, get("/api/v1/path-costs", t)).await;
     assert_eq!(v["overrides"]["stealth"]["GenericAll"], 20);
     assert_eq!(v["defaults"]["stealth"]["ForceChangePassword"], 6);
 
-    // Cheapest principals to Tier Zero (effort): the DA member at 0, alice at 1.
+    // Cheapest principals to Tier Zero (effort): alice at 1 (the DA member is Tier Zero).
     let (s, v) = call(&app, get("/api/v1/tier0/cheapest?profile=effort&limit=5", t)).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let items: Vec<(String, u64)> =
         v["items"].as_array().unwrap().iter().map(|i| (i["node"]["name"].as_str().unwrap().to_string(), i["cost"].as_u64().unwrap())).collect();
-    assert_eq!(items, [("ADMIN@CORP.LOCAL".to_string(), 0), ("ALICE@CORP.LOCAL".to_string(), 1)]);
-    assert_eq!(v["reachable"], 2);
-    assert_eq!(v["by_cost"], json!([{"cost": 0, "count": 1}, {"cost": 1, "count": 1}]));
+    assert_eq!(items, [("ALICE@CORP.LOCAL".to_string(), 1)]);
+    assert_eq!(v["reachable"], 1);
+    assert_eq!(v["by_cost"], json!([{"cost": 1, "count": 1}]));
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn web_ui_cache_headers() {
+    let data = std::env::temp_dir().join(format!("ch-server-cache-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let web = data.join("web");
+    std::fs::create_dir_all(web.join("assets")).unwrap();
+    std::fs::write(web.join("index.html"), "<!doctype html><title>t</title>").unwrap();
+    std::fs::write(web.join("assets/index-abc123.js"), "console.log(1)").unwrap();
+    std::env::set_var("COPPERHOUND_ADMIN_PASSWORD", "test-password");
+    let (st, _) = AppState::new(data.join("d"), Some(web)).unwrap();
+    let app = ch_server::router(st);
+    let cache = |uri: &str| {
+        let app = app.clone();
+        let uri = uri.to_string();
+        async move {
+            let r = tower::ServiceExt::oneshot(app, Request::get(&uri).body(Body::empty()).unwrap()).await.unwrap();
+            (r.status(), r.headers().get("cache-control").map(|v| v.to_str().unwrap().to_string()))
+        }
+    };
+    assert_eq!(cache("/").await, (StatusCode::OK, Some("no-cache".into())));
+    assert_eq!(cache("/zones/abc").await, (StatusCode::OK, Some("no-cache".into())), "client-side route");
+    assert_eq!(cache("/assets/index-abc123.js").await, (StatusCode::OK, Some("public, max-age=31536000, immutable".into())));
+    assert_eq!(cache("/api/v1/health").await.1, None, "API responses unchanged");
     let _ = std::fs::remove_dir_all(&data);
 }

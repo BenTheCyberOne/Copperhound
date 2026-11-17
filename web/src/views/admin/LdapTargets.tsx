@@ -157,8 +157,9 @@ export function LdapTargets() {
       </div>
       <p className="muted small-text">
         CopperHound reads a domain controller itself — users, groups, computers, ACLs, GPOs, trusts and ADCS — with a read-only
-        account over LDAPS, and ingests the result. Nothing to install. Sessions and local groups are not in LDAP; use SharpHound
-        for those.
+        account over LDAPS, and ingests the result. Nothing to install. Sessions and local groups are not in LDAP: use SharpHound,
+        or upload logon data for sessions (Security event 4624 export or Defender XDR). Optional network probes (More options) add
+        SMB signing, DC LDAP signing and AD CS web enrollment for NTLM relay paths.
       </p>
       {list && list.length > 0 && (
         <table className="data-table compact">

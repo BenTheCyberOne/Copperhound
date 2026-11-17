@@ -149,7 +149,7 @@ function ZoneDetail({ zone, onEdit }: { zone: Zone; onEdit: () => void }) {
             />
             Ring on canvas
           </label>
-          <label className="row gap" title="How much this zone counts in cross-zone remediation plans (0 leaves it out)">
+          <label className="row gap zone-weight" title="How much this zone counts in cross-zone remediation plans (0 leaves it out)">
             Plan weight
             <NumberField
               value={zone.weight}

@@ -6,6 +6,10 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
+NTLM relay paths, sessions from logon data and cost-aware paths.
+
 ### Added
 
 - NTLM relay edges, as in BloodHound CE: `CoerceAndRelayNTLMToSMB`, `CoerceAndRelayNTLMToLDAP`,
@@ -37,9 +41,27 @@ Notable changes to CopperHound. The format follows
 
 ### Changed
 
+- Members of Tier Zero groups are Tier Zero (transitively, not through Domain Users, Authenticated
+  Users, Everyone and similar broad groups). Exposure no longer counts Domain Admins members as exposed
+  principals; control over them shows up in `tier0-control`.
 - `WritePublicInformation` is traversable (ESC14A): exposure can rise for existing data. Built-in edge
   traversability now follows the running release for graphs written earlier.
 - New relay and AD edges need a re-ingest of existing data to appear.
+
+### Fixed
+
+- Data page: Data quality no longer leaves a gap under Loaded graph; Database management spans the page.
+- Data quality lists each problem once with the affected domains and its advice, tells tenants that share a
+  name apart by id, and explains objects of unknown kind (`/quality`: `warning_codes`, `advice`,
+  `unknown_objects`; warnings are now short facts).
+- The navigation rail fits windows down to 900 px high; the Explore toolbar stays on one row with the details
+  drawer open.
+- Posture: the exposure chart axis fits small percentages.
+- Zone header spacing, the Users role cards and the SSO status tag.
+- Node details hide empty properties behind "Show N empty"; Exposure collapses kinds with no path.
+- Ingest job messages use thousands separators; collector and server settings text mention logon data.
+- The web UI is served with cache headers (`no-cache` for the page, long-lived for hashed assets), so an
+  upgrade shows without a hard refresh.
 
 ## [0.3.0] - 2026-11-13
 

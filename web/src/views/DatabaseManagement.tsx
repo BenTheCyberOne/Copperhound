@@ -56,7 +56,7 @@ export function DatabaseManagement({ onCleared }: { onCleared: () => void }) {
   };
 
   return (
-    <section className="card form-stack db-manage">
+    <section className="card form-stack db-manage span-2">
       <h2>Database management</h2>
       <p className="muted small-text">Permanently delete stored data. Users, single sign-on and notification settings and the audit log are never affected.</p>
       <label className="toggle">

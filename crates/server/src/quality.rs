@@ -32,6 +32,20 @@ const LOCAL_GROUP_MIN: f64 = 0.10;
 const ACL_MIN: f64 = 0.90;
 const STALE_DAYS: i64 = 30;
 
+/// How to fix each warning, keyed by the codes in `warning_codes`. The UI shows
+/// each once, with the domains / tenants it applies to.
+const ADVICE: &[(&str, &str)] = &[
+    ("sessions", "User-on-computer paths (HasSession) are mostly missing. Collect sessions (SharpHound -c Session,LoggedOn, ideally looped), or upload logon data: scripts/Export-CopperHoundLogons.ps1 (Security event 4624) or a Defender XDR DeviceLogonEvents export."),
+    ("local_groups", "Local admin / RDP rights are mostly missing. Collect LocalGroup (needs admin or remote SAM access)."),
+    ("acl", "The collector could not read some security descriptors, so control edges are incomplete."),
+    ("stale", "Collect again: paths that were removed or added since are not reflected."),
+    ("az_roles", "AzureHound could not read role members, so role-based paths are missing."),
+    ("az_members", "Group-based Entra paths are missing."),
+    ("az_owners", "Owner-based application paths are missing."),
+    ("az_subscriptions", "Azure RBAC (resource) paths are not covered: collect with an identity that can read subscriptions."),
+    ("unknown", "Objects referenced by SID or id that no collected record describes: principals of domains or forests not collected, deleted objects, or well-known SIDs. Their paths are real, but their kind is unknown."),
+];
+
 #[derive(Default)]
 struct Ad {
     users: u64,
@@ -197,25 +211,27 @@ pub fn compute(g: &Graph, sources: &[Value]) -> Value {
             let sess = pct(d.with_sessions, d.computers_enabled);
             let lg = pct(d.with_local_groups, d.computers_enabled);
             let acl = if d.with_acl == 0 { None } else { pct(d.with_acl, d.objects) };
-            let mut warnings: Vec<String> = Vec::new();
+            let mut warnings: Vec<(&str, String)> = Vec::new();
             if d.computers_enabled > 0 && sess.is_some_and(|p| p < SESSION_MIN * 100.0) {
-                warnings.push(format!("Session data for {}% of enabled computers: user-on-computer paths (HasSession) are mostly missing. Collect sessions (SharpHound -c Session,LoggedOn, ideally looped), or upload logon data: scripts/Export-CopperHoundLogons.ps1 (Security event 4624) or a Defender XDR DeviceLogonEvents export.", sess.unwrap_or(0.0)));
+                warnings.push(("sessions", format!("Session data for {}% of enabled computers.", sess.unwrap_or(0.0))));
             }
             if d.computers_enabled > 0 && lg.is_some_and(|p| p < LOCAL_GROUP_MIN * 100.0) {
-                warnings.push(format!("Local group data for {}% of enabled computers: local admin / RDP rights are mostly missing. Collect LocalGroup (needs admin or remote SAM access).", lg.unwrap_or(0.0)));
+                warnings.push(("local_groups", format!("Local group data for {}% of enabled computers.", lg.unwrap_or(0.0))));
             }
             if d.objects > 0 && acl.is_some_and(|p| p < ACL_MIN * 100.0) {
-                warnings.push(format!("Only {}% of objects have ACL data: the collector could not read some security descriptors, so control edges are incomplete.", acl.unwrap_or(0.0)));
+                warnings.push(("acl", format!("Only {}% of objects have ACL data.", acl.unwrap_or(0.0))));
             }
             if age.is_some_and(|a| a > STALE_DAYS) {
-                warnings.push(format!("Newest collection is {} days old.", age.unwrap_or(0)));
+                warnings.push(("stale", format!("Newest collection is {} days old.", age.unwrap_or(0))));
             }
+            let (codes, warnings): (Vec<&str>, Vec<String>) = warnings.into_iter().unzip();
             json!({
                 "type": "ad", "id": dom, "name": name, "objectid": g.oid(dom),
                 "users": d.users, "users_enabled": d.users_enabled, "groups": d.groups,
                 "computers": d.computers, "computers_enabled": d.computers_enabled,
                 "session_coverage": sess, "local_group_coverage": lg, "acl_coverage": acl,
                 "collected_at": at, "collected_at_exact": exact, "age_days": age, "sources": nsrc, "warnings": warnings,
+                "warning_codes": codes,
             })
         })
         .collect();
@@ -225,22 +241,23 @@ pub fn compute(g: &Graph, sources: &[Value]) -> Value {
         .map(|(&t, a)| {
             let name = g.name(t).to_string();
             let (at, age, nsrc, exact) = newest(&name, g.oid(t));
-            let mut warnings: Vec<String> = Vec::new();
+            let mut warnings: Vec<(&str, String)> = Vec::new();
             if a.roles > 0 && a.role_assignments == 0 {
-                warnings.push("No directory role assignments: AzureHound could not read role members, so role-based paths are missing.".into());
+                warnings.push(("az_roles", "No directory role assignments.".into()));
             }
             if a.groups > 0 && a.memberships == 0 {
-                warnings.push("No group memberships were collected.".into());
+                warnings.push(("az_members", "No group memberships were collected.".into()));
             }
             if a.apps > 0 && a.app_owners == 0 {
-                warnings.push("No application owners were collected.".into());
+                warnings.push(("az_owners", "No application owners were collected.".into()));
             }
             if a.subscriptions == 0 {
-                warnings.push("No Azure subscriptions: Azure RBAC (resource) paths are not covered — collect with an identity that can read subscriptions.".into());
+                warnings.push(("az_subscriptions", "No Azure subscriptions.".into()));
             }
             if age.is_some_and(|x| x > STALE_DAYS) {
-                warnings.push(format!("Newest collection is {} days old.", age.unwrap_or(0)));
+                warnings.push(("stale", format!("Newest collection is {} days old.", age.unwrap_or(0))));
             }
+            let (codes, warnings): (Vec<&str>, Vec<String>) = warnings.into_iter().unzip();
             json!({
                 "type": "tenant", "id": t, "name": name, "objectid": g.oid(t),
                 "users": a.users, "groups": a.groups, "apps": a.apps, "service_principals": a.service_principals,
@@ -248,11 +265,18 @@ pub fn compute(g: &Graph, sources: &[Value]) -> Value {
                 "memberships": a.memberships, "app_owner_coverage": pct(a.app_owners, a.apps),
                 "device_owner_coverage": pct(a.devices_with_owner, a.devices), "subscriptions": a.subscriptions,
                 "collected_at": at, "collected_at_exact": exact, "age_days": age, "sources": nsrc, "warnings": warnings,
+                "warning_codes": codes,
             })
         })
         .collect();
-    tenants.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    json!({ "domains": domains, "tenants": tenants })
+    tenants.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()).then(a["objectid"].as_str().cmp(&b["objectid"].as_str())));
+    let unknown = (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Unknown).count();
+    json!({
+        "domains": domains,
+        "tenants": tenants,
+        "unknown_objects": unknown,
+        "advice": ADVICE.iter().map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<String, Value>>(),
+    })
 }
 
 type Cache = Mutex<Option<(u64, Arc<Value>)>>;

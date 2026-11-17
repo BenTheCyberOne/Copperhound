@@ -504,6 +504,7 @@ input[type="number"] {
   min-height: 200px;
   background: var(--canvas-bg);
   overflow: hidden;
+  container: canvas / inline-size;
 }
 .sigma-container {
   position: absolute;
@@ -533,6 +534,29 @@ input[type="number"] {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 5px 10px;
+}
+/* A narrow canvas (details drawer open): compact the toolbar so it stays one row. */
+@container canvas (max-width: 860px) {
+  .canvas-toolbar {
+    gap: 4px;
+  }
+  .canvas-toolbar button,
+  .canvas-toolbar .toggle {
+    padding: 3px 7px;
+    font-size: 12px;
+  }
+  .canvas-count {
+    padding: 3px 7px;
+    font-size: 12px;
+  }
+  .canvas-toolbar .tb-long {
+    display: none;
+  }
+}
+@container canvas (max-width: 700px) {
+  .canvas-count {
+    display: none;
+  }
 }
 .canvas-count {
   margin-left: auto;
@@ -1670,6 +1694,23 @@ button.legend-item.is-hidden .legend-kind {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* Shorter windows: tighter items so every view, admin ones included, fits
+   without scrolling the rail (about 16 items at 900px). */
+@media (max-height: 1000px) {
+  .rail {
+    gap: 1px;
+    padding: 6px 6px;
+  }
+  .rail-item {
+    gap: 1px;
+    padding: 5px 2px 4px;
+    font-size: 10.5px;
+  }
+  .rail-item .rail-icon {
+    width: 18px;
+    height: 18px;
+  }
+}
 .rail-badge {
   position: absolute;
   top: 4px;
@@ -1718,6 +1759,16 @@ button.legend-item.is-hidden .legend-kind {
   align-items: center;
   justify-content: flex-end;
 }
+.props-empty-toggle {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.zone-detail .head-actions {
+  gap: 8px 16px;
+}
+.zone-weight input {
+  width: 64px;
+}
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1750,6 +1801,14 @@ button.legend-item.is-hidden .legend-kind {
 }
 .finding-grid {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+/* A column of cards inside a two-column grid, so a tall card on one side
+   leaves no gap on the other. */
+.col-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 .span-2 {
   grid-column: 1 / -1;
@@ -2433,7 +2492,7 @@ button.legend-item.is-hidden .legend-kind {
 }
 .role-cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
 .role-cards .stat {

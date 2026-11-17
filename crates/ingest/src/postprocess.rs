@@ -34,6 +34,43 @@ pub fn tier0_nodes(g: &Graph) -> Vec<u32> {
     hybrid::tier0_nodes(g)
 }
 
+/// Built-in groups that hold (nearly) every principal: their members are never
+/// made Tier Zero by membership, so a broad group nested into a Tier Zero group
+/// stays visible as exposure instead of turning the whole directory Tier Zero.
+fn is_broad_group(oid: &str) -> bool {
+    ["-513", "-514", "-515", "S-1-5-11", "S-1-1-0", "S-1-5-32-545", "S-1-5-32-546"].iter().any(|s| oid.ends_with(s))
+}
+
+/// Transitive members (`MemberOf`, `AZMemberOf`) of Tier Zero nodes that are
+/// not Tier Zero yet: a member of a Tier Zero group holds its rights, so it is
+/// Tier Zero too. Membership is not followed through broad built-in groups
+/// (Domain Users, Domain Computers, Authenticated Users, Everyone, ...).
+pub fn tier0_members(g: &Graph) -> Vec<u32> {
+    let kinds = [ek::MEMBER_OF, ch_model::ek_of("AZMemberOf")];
+    let n = g.node_count();
+    let mut seen = Bits::new(n);
+    let mut stack: Vec<u32> = (0..n as u32).filter(|&i| g.has_flag(i, ch_model::flags::TIER0)).collect();
+    for &t in &stack {
+        seen.set(t);
+    }
+    let mut out = Vec::new();
+    while let Some(x) = stack.pop() {
+        if is_broad_group(g.oid(x)) {
+            continue;
+        }
+        let (ss, ks) = g.in_edges(x);
+        for (&m, k) in ss.iter().zip(ks) {
+            if kinds.contains(k) && !seen.get(m) && !is_broad_group(g.oid(m)) {
+                seen.set(m);
+                out.push(m);
+                stack.push(m);
+            }
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
 
 /// Forests: connected components of domains over `SameForestTrust` (either
 /// direction — intra-forest trusts are two-way and transitive).

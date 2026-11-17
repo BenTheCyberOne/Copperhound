@@ -283,6 +283,7 @@ export function DataView() {
       {error && <p className="error">{error}</p>}
       <ReadOnlyNote need="analyst" what="uploading, deleting uploads and rebuilding the graph" />
       <div className="data-grid">
+      <div className="col-stack">
       <section className="card">
         <div className="section-head">
           <h2>Loaded graph</h2>
@@ -290,6 +291,8 @@ export function DataView() {
         </div>
         {stats ? <StatsSummary stats={stats} /> : !error && <p className="muted">Loading…</p>}
       </section>
+      <DataQuality generation={health?.generation ?? null} />
+      </div>
       <section className="card">
       <h2>Upload collector data</h2>
       <div
@@ -306,8 +309,9 @@ export function DataView() {
             <p>Drop {extensions.join(" / ")} files here</p>
             <p className="muted small-text upload-help">
               SharpHound / AzureHound JSON or zip, LDIF exports (<code>ldapsearch</code>, <code>ldifde</code>; also gzipped) and
-              Sysinternals AD Explorer snapshots (<code>.dat</code>), plus OpenGraph JSON for custom node and edge kinds from any other
-              system.
+              Sysinternals AD Explorer snapshots (<code>.dat</code>), OpenGraph JSON for custom node and edge kinds from any other
+              system, and logon data for sessions (<code>Export-CopperHoundLogons.ps1</code> output, Defender XDR{" "}
+              <code>DeviceLogonEvents</code> as JSON or CSV).
             </p>
             {maxBytes !== null && <p className="muted small-text">Up to {humanSize(maxBytes)} per file</p>}
             <button type="button" onClick={() => fileInput.current?.click()} {...modify}>
@@ -448,7 +452,6 @@ export function DataView() {
         </ul>
       )}
       </section>
-      <DataQuality generation={health?.generation ?? null} />
       {sources !== undefined && <SourcesSection data={sources} />}
       {isAdmin && <DatabaseManagement onCleared={() => void refresh()} />}
       </div>

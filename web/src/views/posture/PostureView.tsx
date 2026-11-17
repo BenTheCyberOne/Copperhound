@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { api, errorMessage } from "../../api/client";
 import { SEVERITIES, type Snapshot } from "../../api/types";
-import { TimeChart } from "../../components/charts/TimeChart";
+import { formatPercent, TimeChart } from "../../components/charts/TimeChart";
 import { EmptyState, StatusView } from "../../components/StatusView";
 import { useAnalysis } from "../../hooks/useAnalysis";
 import { navigate, routeHref, type Route } from "../../hooks/useRoute";
@@ -72,7 +72,7 @@ export function PostureView({ route }: { route: Route }) {
                 title="Exposure — share of principals with a path to Tier Zero"
                 mode="area"
                 yMax={100}
-                formatY={(v) => `${v > 0 && v < 1 ? Number(v.toPrecision(2)) : Math.round(v * 10) / 10}%`}
+                formatY={formatPercent}
                 xLabels={labels}
                 series={[{ key: "exp", label: "Exposure", color: "var(--accent-strong)", values: snaps.map((s) => s.exposure_percent) }]}
               />

@@ -386,6 +386,9 @@ listed in docs/CHQL.md, "Predicate pushdown".
   weight × dominator-subtree count per node over all zones (every candidate,
   not only each zone's top list), picks the best, and deletes it from every
   zone it is not a member of. Also checked against a from-scratch reference.
+  In every zone, Tier Zero objects are never candidates and never count as
+  exposed principals (for the Tier Zero zone they are the targets anyway);
+  `exposure_analysis` applies the same principal rule.
 
 ## Post-processing
 

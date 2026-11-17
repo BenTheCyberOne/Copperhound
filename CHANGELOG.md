@@ -6,6 +6,17 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-17
+
+### Fixed
+
+- The remediation planner never proposes a Tier Zero object as a fix. For zones other than Tier Zero it
+  could suggest removing, say, Domain Admins' rights over its own members, which also inflated
+  weighted plans and the report's cross-zone figure.
+- Tier Zero objects no longer count as exposed principals of other zones (zone exposure, plans, finding
+  impact against other targets): whoever holds Tier Zero already controls every zone.
+- Planner and posture chart axes no longer repeat "1%" when values are small.
+
 ## [0.4.0] - 2026-11-17
 
 NTLM relay paths, sessions from logon data and cost-aware paths.

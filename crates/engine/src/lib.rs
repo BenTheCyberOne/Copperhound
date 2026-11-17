@@ -442,8 +442,10 @@ pub fn exposure_analysis(
     // conflicts, from the outermost level inward.
     let mut inflow = vec![0f64; n];
     let mut exposed = 0u64;
+    // Tier Zero objects are never counted as exposed: whoever holds them already
+    // controls every zone. (For Tier Zero itself they are the targets.)
     for &u in &order[t0..] {
-        if is_principal(g.kind(u)) {
+        if is_principal(g.kind(u)) && !g.has_flag(u, flags::TIER0) {
             inflow[u as usize] = 1.0;
             exposed += 1;
         }
@@ -502,7 +504,7 @@ pub fn exposure_analysis(
         if dist[i] != INF && dist[i] > 0 {
             with[k] += 1;
         }
-        if dist[i] != 0 && is_principal(NodeKind::ALL[k]) {
+        if dist[i] != 0 && is_principal(NodeKind::ALL[k]) && g.flags(i as u32) & flags::TIER0 == 0 {
             total_principals += 1;
         }
     }

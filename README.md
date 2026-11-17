@@ -80,7 +80,7 @@ Computed in the background after every ingest:
   *entirely*. The plan is recomputed after each step, so the cumulative
   reduction curve is exact. Members of zone groups are treated
   as part of the zone, so it never proposes "remove the admins from Domain
-  Admins". Give zones weights and it plans across all of them at once,
+  Admins", and Tier Zero objects are never proposed as fixes for any zone. Give zones weights and it plans across all of them at once,
   ranking fixes by weighted exposure cut.
 - **Remediation hand-off** — turn fix-list edges or plan steps into a
   PowerShell script (one suggested command per edge, objects named by SID /
@@ -213,6 +213,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the road
 
 Each version, in short; the details are in [CHANGELOG.md](CHANGELOG.md).
 
+- **0.4.1** (2026-11-17): bug fixes. The remediation planner no longer proposes
+  Tier Zero objects as fixes, and Tier Zero objects no longer count as exposed in
+  other zones; chart axes fixed for small values.
 - **0.4.0** (2026-11-17): NTLM relay, sessions from logon data and cost-aware paths.
   - NTLM relay edges (SMB, LDAP, LDAPS, AD CS web and RPC enrollment), ESC16,
     ESC14 and more AD edges, with opt-in network probes in the LDAP collector.

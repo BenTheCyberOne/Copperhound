@@ -371,7 +371,11 @@ impl Planner {
         });
         let target: Vec<bool> = nodes.iter().map(|&v| v != UNDEF && is_target[v as usize]).collect();
         let principal: Vec<bool> =
-            nodes.iter().zip(&target).map(|(&v, &t)| v != UNDEF && !t && crate::is_principal(g.kind(v))).collect();
+            nodes
+                .iter()
+                .zip(&target)
+                .map(|(&v, &t)| v != UNDEF && !t && crate::is_principal(g.kind(v)) && !g.has_flag(v, ch_model::flags::TIER0))
+                .collect();
         Some(Planner {
             nodes,
             ncore,
@@ -714,7 +718,9 @@ pub fn plan_weighted(g: &Graph, zones: &[WeightedZone<'_>], opts: &PlanOptions, 
                 *s += w * c;
             });
         }
-        let mut ranked: Vec<(u32, u64)> = touched.iter().map(|&v| (v, score[v as usize])).collect();
+        // Tier Zero objects are never proposed as a fix.
+        let mut ranked: Vec<(u32, u64)> =
+            touched.iter().filter(|&&v| !g.has_flag(v, ch_model::flags::TIER0)).map(|&v| (v, score[v as usize])).collect();
         for &v in &touched {
             score[v as usize] = 0;
         }
@@ -785,7 +791,8 @@ pub fn plan(g: &Graph, targets: &[u32], opts: &PlanOptions, cancel: &Cancel) -> 
         };
         let base = *baseline.get_or_insert(dom.exposed);
         let pl = &*planner;
-        let pick = pick_candidate(opts, dom.ranked.iter().copied(), |d| {
+        let candidates = dom.ranked.iter().copied().filter(|&(d, _)| !g.has_flag(d, ch_model::flags::TIER0));
+        let pick = pick_candidate(opts, candidates, |d| {
             let (ds, ks) = g.out_edges(d);
             ds.iter().zip(ks).filter(|(&v, &k)| f.allows(k) && pl.reachable(v)).map(|(&v, &k)| (d, v, k)).collect()
         });
@@ -926,7 +933,7 @@ mod tests {
             if b == root {
                 continue;
             }
-            if !is_target[b as usize] && crate::is_principal(g.kind(b)) {
+            if !is_target[b as usize] && crate::is_principal(g.kind(b)) && !g.has_flag(b, flags::TIER0) {
                 cnt[b as usize] += 1;
                 exposed += 1;
             }
@@ -938,7 +945,7 @@ mod tests {
         let mut ranked: Vec<(u32, u64)> = post
             .iter()
             .copied()
-            .filter(|&b| b != root && !is_target[b as usize] && cnt[b as usize] > 0)
+            .filter(|&b| b != root && !is_target[b as usize] && cnt[b as usize] > 0 && !g.has_flag(b, flags::TIER0))
             .map(|b| (b, cnt[b as usize]))
             .collect();
         ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -1096,6 +1103,41 @@ mod tests {
     }
 
     /// Fix costs: random `window` / `fixed` nodes, with and without `live_first`.
+    /// Zones other than Tier Zero: Tier Zero objects are never proposed as a
+    /// fix nor counted as exposed, and the plan still matches the reference.
+    #[test]
+    fn non_tier0_zones_skip_tier0_objects() {
+        let mut checked = 0;
+        for seed in 0..250u64 {
+            let g = random_graph(40 + (seed % 60) as u32, 160 + (seed % 7) as usize * 40, 8, seed ^ 0x51ed);
+            let mut r = Rng(seed | 1);
+            let zone: Vec<u32> = (0..3).map(|_| r.below(g.node_count() as u64) as u32).filter(|&v| !g.has_flag(v, flags::TIER0)).collect();
+            if zone.is_empty() {
+                continue;
+            }
+            for protect in [false, true] {
+                let opts = PlanOptions { steps: 4, protect_target_membership: protect, ..Default::default() };
+                assert_same(&g, &zone, &opts, &format!("seed {seed} protect {protect}"));
+                let p = plan(&g, &zone, &opts, &Cancel::never());
+                assert!(p.steps.iter().all(|s| !g.has_flag(s.node, flags::TIER0)), "seed {seed}: a Tier Zero object was proposed");
+                // Exposure counts no Tier Zero object.
+                let exp = crate::simulate::exposure_with(&g, &zone, &Removal::default(), 0);
+                let t0_reaching = {
+                    let bfs = ch_engine::par_bfs(&g, &zone, ch_engine::Dir::Reverse, &|_, _, k| g.is_traversable(k));
+                    bfs.order.iter().filter(|&&v| !zone.contains(&v) && g.has_flag(v, flags::TIER0) && crate::is_principal(g.kind(v))).count()
+                };
+                if !protect {
+                    assert_eq!(p.baseline, exp.exposed_principals, "seed {seed}: planner and exposure agree");
+                }
+                checked += t0_reaching;
+                // Weighted: Tier Zero plus this zone.
+                let t0 = g.nodes_with_flag(flags::TIER0);
+                assert_weighted_same(&g, &[(2, t0), (1, zone.clone())], &opts, &format!("weighted seed {seed}"));
+            }
+        }
+        assert!(checked > 50, "only {checked} Tier Zero principals reached a zone: the test would not notice a regression");
+    }
+
     #[test]
     fn fix_costs_match_reference() {
         let mut window = 0;

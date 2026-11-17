@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { api, errorMessage } from "../../api/client";
 import type { GraphResult, PlanResponse, PlanStep } from "../../api/types";
-import { TimeChart } from "../../components/charts/TimeChart";
+import { formatPercent, TimeChart } from "../../components/charts/TimeChart";
 import { CategoryChecklist } from "../../components/CategoryChecklist";
 import { KindBadge } from "../../components/KindBadge";
 import { NumberField } from "../../components/NumberField";
@@ -241,7 +241,7 @@ export function Planner() {
             title="Cumulative exposure reduction"
             mode="area"
             yMax={100}
-            formatY={(v) => `${Math.round(v)}%`}
+            formatY={formatPercent}
             xLabels={["Start", ...plan.steps.map((_, i) => `Step ${i + 1}`)]}
             series={[
               {

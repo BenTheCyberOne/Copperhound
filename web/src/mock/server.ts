@@ -856,7 +856,7 @@ function routePublic(req: ApiRequest): ApiResponse {
     return ok({
       status: "ok",
       graph_loaded: true,
-      version: "0.4.0-mock",
+      version: "0.4.1-mock",
       generation: state.generation,
       limits: LIMITS,
       snapshot_id: state.snapshotId,

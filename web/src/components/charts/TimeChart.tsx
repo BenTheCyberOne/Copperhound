@@ -25,6 +25,14 @@ interface Props {
 
 const PAD = { top: 12, right: 16, bottom: 26, left: 48 };
 
+/** Percent axis label with enough precision for small scales (0.25%, 2.5%, 25%). */
+export function formatPercent(v: number): string {
+  if (v === 0) return "0%";
+  if (Math.abs(v) < 1) return `${Number(v.toPrecision(2))}%`;
+  if (Math.abs(v) < 10) return `${Math.round(v * 10) / 10}%`;
+  return `${Math.round(v)}%`;
+}
+
 function niceMax(v: number): number {
   if (v <= 0) return 1;
   const p = 10 ** Math.floor(Math.log10(v));

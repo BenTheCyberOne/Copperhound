@@ -173,7 +173,9 @@ Open a finding to see its items, guidance and history across snapshots. From the
   or the canvas context menu) and see exposure before and after.
 - **Remediation planner**: each step removes the object whose onward attack edges cut the
   most principals off the zone entirely. The plan is recomputed after every step, so the
-  cumulative curve is exact. It never proposes removing admins from admin groups. Objects
+  cumulative curve is exact. It never proposes removing admins from admin groups, and never
+  proposes a Tier Zero object as the fix; Tier Zero objects do not count as exposed in other
+  zones either, since whoever holds Tier Zero controls every zone. Objects
   with the `fix_cost` property are skipped (`fixed`) or flagged as needing a maintenance
   window (`window`); see [OT.md](OT.md#fix-cost).
   - **All zones, by weight** plans for every zone at once. Give each zone a weight

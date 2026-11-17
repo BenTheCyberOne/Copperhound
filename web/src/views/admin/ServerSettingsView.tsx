@@ -62,7 +62,7 @@ function WatchStatusPanel({ data }: { data: SettingsResponse }) {
 }
 
 const DEFAULT_ANALYSIS: AnalysisSettings = { unified_tier0: true };
-const DEFAULT_INGEST: IngestSettings = { merge_policy: "newest", session_window_hours: 0 };
+const DEFAULT_INGEST: IngestSettings = { merge_policy: "newest", session_window_hours: 0, session_max_age_days: 0 };
 
 /**
  * PUT /settings replaces the whole object and omitted sections reset to their defaults,
@@ -220,6 +220,20 @@ function IngestPanel({ data, onSaved }: { data: SettingsResponse; onSaved: (r: S
       <span className="muted small-text">
         Newest wins only. 0 keeps just each computer&apos;s newest session data; N also keeps <code>HasSession</code> edges from
         collections up to N hours older, useful when sessions are collected separately and often (0–8760).
+      </span>
+      <div className="form-grid">
+        <label htmlFor="session-max-age">Session max age (days)</label>
+        <NumberField
+          id="session-max-age"
+          min={0}
+          max={3650}
+          value={form.session_max_age_days ?? 0}
+          onCommit={(v) => setForm((f) => ({ ...f, session_max_age_days: Math.round(v) }))}
+        />
+      </div>
+      <span className="muted small-text">
+        Drop sessions last seen more than N days before the newest time in the uploaded data (collection times and logon
+        times), so old logons stop counting as attack paths. 0 keeps every session; sessions with no known time are kept.
       </span>
       <p className="notice">
         <span>

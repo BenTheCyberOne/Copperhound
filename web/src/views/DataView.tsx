@@ -13,7 +13,7 @@ import { SourcesSection } from "./SourcesSection";
 
 const fmt = new Intl.NumberFormat();
 /** Fallback when /health has no limits (older servers). */
-const DEFAULT_EXTENSIONS = [".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat"];
+const DEFAULT_EXTENSIONS = [".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat", ".csv"];
 
 /**
  * The file picker matches `accept` against the last extension only, so ".ldif.gz" also

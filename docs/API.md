@@ -218,7 +218,10 @@ Minimum role per endpoint (see [Roles](#roles)). "public" = no authentication.
 | GET | `/columns` | viewer | [Property filters](#property-filters) |
 | GET | `/edge-kinds`, `/node-kinds` | viewer | [Kinds](#node-and-edge-kinds) |
 | GET | `/edges/composition` | viewer | [Edge composition](#edge-composition) |
+| GET | `/edges/session` | viewer | [Edge composition](#edge-composition) (session record) |
 | POST | `/path` | viewer | [Shortest paths](#shortest-paths) |
+| GET, PUT | `/path-costs` | viewer / admin | [Path costs](#path-costs) |
+| GET | `/tier0/cheapest` | viewer | [Path costs](#path-costs) |
 | POST | `/query` | viewer | [CHQL queries](#chql-queries) |
 | DELETE | `/query/{query_id}` | viewer | [CHQL queries](#chql-queries) |
 | GET | `/queries` | viewer | [Prebuilt queries](#prebuilt-queries) |
@@ -354,6 +357,7 @@ Background: [DATA.md](DATA.md#importing-multiple-dumps); rules: docs/ARCHITECTUR
 |---|---|---|
 | `merge_policy` | `"newest"` | `"newest"`: per object the newest collection's record wins and edges it supersedes are dropped. `"union"`: plain union of all sources. |
 | `session_window_hours` | `0` | `newest` only: also keep `HasSession` edges from collections up to N hours older than a computer's newest session data. 0–8760. |
+| `session_max_age_days` | `0` | Drop sessions last seen more than N days before the newest time in the input (collection and logon times). 0 = no limit; sessions with no known time stay. 0–3650. |
 
 Applies to the next ingest job (`POST /ingest` or the watch folder).
 
@@ -487,6 +491,10 @@ Shared colours and icons per kind: see [Node kind styles](#node-kind-styles).
 
 ### Edge composition
 
+`GET /edges/session?src=<computer>&dst=<user>` → when and how a `HasSession` edge was seen:
+`{"src", "dst", "first_seen", "last_seen", "sources": ["sessions" | "privileged-sessions" | "registry-sessions" | "logon-events" | "defender"], "logon_types": [10], "generation"}`
+(times RFC 3339, `null` when unknown). `404` when the graph has no record (graphs built before 0.4.0, or no such edge).
+
 `GET /edges/composition?src=12&dst=3&kind=ADCSESC1` explains why an edge derived by post-processing exists
 (`/edge-kinds` marks these kinds `"composite": true`): DCSync, SyncLAPSPassword, CoerceToTGT, GoldenCert, the
 ADCSESC* edges, the derived Entra role edges (AZGlobalAdmin, AZAddMembers, AZResetPassword, AZMG*, …) and the
@@ -508,6 +516,25 @@ longer in the loaded graph.
 
 ## 3. Paths and queries
 
+### Path costs
+
+Cheapest paths weigh each edge by what it takes to use it (`ch_engine::cost`). Two profiles:
+`effort` (work and preconditions: credential theft, cracking, coercion) and `stealth` (likelihood of
+detection: DCSync, password resets and group membership changes are loud). Every edge kind has a built-in
+cost per profile (`MemberOf` 0; unknown kinds 2). A `HasSession` edge adds a penalty by the time since the
+session was last seen, measured from the newest session time in the graph: same day +0, up to 7 days +1, up
+to 30 days +3, older +6, unknown +2.
+
+- `GET /path-costs` → `{"overrides": {"effort": {kind: cost}, "stealth": {…}}, "defaults": {"effort":
+  {kind: cost}, "stealth": {…}}, "default_custom": 2, "max": 1000}` (defaults for the loaded graph's
+  traversable kinds).
+- `PUT /path-costs` (admin) `{"effort": {"AdminTo": 2}, "stealth": {"GenericAll": 4}}` replaces the
+  overrides (costs 0–1000; stored in `<data>/path_costs.json`, included in backups).
+- `GET /tier0/cheapest?profile=effort&limit=50` → the users, computers and Entra principals outside Tier Zero
+  with the cheapest path to it: `{"profile", "items": [{"node": Node, "cost"}], "reachable", "by_cost":
+  [{"cost", "count"}], "session_reference", "elapsed_ms", "generation"}`, ordered by cost then name. One
+  reverse Dijkstra over the whole graph (about 1 s at 2.5M objects).
+
 ### Shortest paths
 
 `POST /path` PathRequest → GraphResult with one path in `paths` (or empty if none), plus `hops` and
@@ -521,6 +548,9 @@ longer in the loaded graph.
 - `to` is ignored when `to_tier0`. `"to_zone": "<zone id>"` targets the nearest member of that
   [zone](#zones-privilege-zones) and overrides `to`/`to_tier0`.
 - `exclude` lists edge kinds not to follow; `all_edges` follows non-traversable kinds too.
+- With `"cost": "effort"` or `"stealth"` the path is the cheapest by [edge cost](#path-costs) rather than
+  the fewest hops, and the result adds `cost` = `{"profile", "total", "hop_costs": [..]}` (one cost per hop).
+  Not combined with `all` or `network`.
 - With `"all": true` (all shortest paths) the result holds every shortest path as one subgraph (up to
   2,000 relationships; `truncated` when capped), `paths`/`hops` give one of them, and `all_paths` =
   `{"length", "nodes", "edges", "truncated"}` (`nodes` / `edges` are counts).
@@ -1075,7 +1105,7 @@ At sign-in, send the code as `otp` to `POST /login` (see [Authentication](#authe
 
 ### Settings and watch folder (admin)
 
-- `GET /settings` → `{"settings":{"watch":{"enabled","dir","mode","settle_seconds","archive","keep_archives"},"analysis":{"unified_tier0":true},"ingest":{"merge_policy":"newest","session_window_hours":0}},"watch_dir_resolved","watch_status":{"last_scan","last_import","last_job","imported_files","pending":[],"last_error"}}`
+- `GET /settings` → `{"settings":{"watch":{"enabled","dir","mode","settle_seconds","archive","keep_archives"},"analysis":{"unified_tier0":true},"ingest":{"merge_policy":"newest","session_window_hours":0,"session_max_age_days":0}},"watch_dir_resolved","watch_status":{"last_scan","last_import","last_job","imported_files","pending":[],"last_error"}}`
 - `PUT /settings` with the `settings` object. Omitted fields take their defaults.
 - `analysis.unified_tier0` (default `true`): AD and Entra ID Tier Zero form one target set and `/tier0` and
   `/path` follow edges across the hybrid boundary (`SyncedTo*`, `SeamlessSSO`, `EntraConnectCredentials`).
@@ -1095,7 +1125,7 @@ The server reads domain controllers itself (no SharpHound run):
 
 - `GET /collect/ldap` → targets (`password` never returned; `password_set`, `running`, `last_run`,
   `last_ok`, `last_error`, `last_objects`, `last_seconds`).
-- `PUT /collect/ldap` `{"id"?, "name", "enabled", "url": "ldaps://dc01.corp.local", "starttls"?, "allow_plain"?, "insecure_skip_verify"?, "bind_dn", "password"?, "base_dn"?, "include_configuration"?: true, "interval_hours"?: 24}`
+- `PUT /collect/ldap` `{"id"?, "name", "enabled", "url": "ldaps://dc01.corp.local", "starttls"?, "allow_plain"?, "insecure_skip_verify"?, "bind_dn", "password"?, "base_dn"?, "include_configuration"?: true, "interval_hours"?: 24, "probe"?: false, "assume_ntlm_allowed"?: false}`
   — create or update (omit `password` to keep it). Plain `ldap://` needs `starttls` or an explicit
   `allow_plain`.
 - `POST /collect/ldap/{id}/test` → `{"ok", "dns_host_name", "default_naming_context"}` or `{"ok": false, "error"}`.
@@ -1107,6 +1137,17 @@ with the SD flags control (owner + DACL, readable without admin rights), complet
 values by range retrieval, reads the LAPS schema GUIDs, writes `uploads/ldap-<name>.ldif.gz` (replaced each
 run) and queues an ingest. Enabled targets run every `interval_hours` (0 = manual). Sessions and local groups
 are not in LDAP. The bind password is stored in `<data>/ldap_collect.json`.
+
+With `probe` (opt-in, active traffic), the run also probes every enabled computer with a DNS host name, 32 at
+a time: an SMB2 negotiate on 445 (signing required → `smbsigning`), and on DCs a TCP check of 389 / 636
+(`ldapavailable`, `ldapsavailable`) plus a simple bind on 389 with a throwaway DN and random password
+(`strongerAuthRequired` → `ldapsigning: true`, `invalidCredentials` → `false`; the target's credentials are
+never sent without TLS). Enterprise CA hosts get an unauthenticated `GET http://<host>/certsrv/`; a 401 offering
+NTLM or Negotiate sets `hasvulnerableendpoint` and `httpenrollmentendpoints`. The facts are written into the
+LDIF as `copperhound-*` attributes. `assume_ntlm_allowed` (only with `probe`) records
+`restrictoutboundntlm: false` and `restrictoutboundntlmassumed: true` on probed computers, so relay edges can
+be derived without SharpHound. WebClient, LDAPS channel binding, HTTPS EPA and CA RPC encryption are not
+probed.
 
 ### Collector clients (admin)
 

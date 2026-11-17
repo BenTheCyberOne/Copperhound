@@ -18,6 +18,8 @@ pub mod env;
 pub mod hmac_auth;
 pub mod kindstyle;
 pub mod ldapcollect;
+pub mod probe;
+pub mod costs;
 pub mod mfa;
 pub mod network;
 pub mod notify;
@@ -108,6 +110,9 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/posture/{id}", delete(analysis::delete_snapshot))
         .route("/edge-kinds", get(api::edge_kinds))
         .route("/edges/composition", get(api::edge_composition))
+        .route("/edges/session", get(api::edge_session))
+        .route("/path-costs", get(costs::get_costs).put(costs::put_costs))
+        .route("/tier0/cheapest", get(costs::cheapest))
         .route("/database/clear", post(dbadmin::clear))
         .route("/backup", get(backup::backup))
         .route("/restore", post(backup::restore).layer(DefaultBodyLimit::disable()))

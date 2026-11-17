@@ -11,7 +11,8 @@
 //! each run) and an ingest is queued; the LDIF reader does the rest.
 //!
 //! Data that LDAP does not hold (sessions, local groups, user rights) is not
-//! collected; see the data-quality page. Configuration: `<data>/ldap_collect.json`
+//! collected; see the data-quality page. With `probe` on, computers are also
+//! probed over the network for NTLM relay facts ([`crate::probe`]). Configuration: `<data>/ldap_collect.json`
 //! (the bind password is stored there and never returned by the API).
 
 use crate::api::{ApiError, St};
@@ -58,6 +59,13 @@ pub struct Target {
     pub base_dn: String,
     pub include_configuration: bool,
     pub interval_hours: u32,
+    /// Probe computers over the network for NTLM relay facts (SMB signing,
+    /// DC LDAP signing, AD CS web enrollment over HTTP). Opt-in: active traffic.
+    pub probe: bool,
+    /// With `probe`: record outgoing NTLM as allowed (the Windows default) on
+    /// probed computers, so relay edges can be derived without SharpHound's
+    /// registry data. Marked `restrictoutboundntlmassumed` on each computer.
+    pub assume_ntlm_allowed: bool,
     // ---- status (written by the collector)
     pub last_run: Option<String>,
     pub last_ok: Option<String>,
@@ -229,8 +237,11 @@ async fn rest_of_range(ldap: &mut ldap3::Ldap, dn: &str, attr: &str, mut from: u
     Ok(out)
 }
 
+/// Extra attributes per entry (lowercase DN), appended to the LDIF record.
+type Extras = std::collections::HashMap<String, Vec<(String, Vec<Vec<u8>>)>>;
+
 /// Page through `base` (subtree) into `out`; returns the entry count.
-async fn dump_nc(ldap: &mut ldap3::Ldap, base: &str, filter: &str, attrs: &[&str], out: &mut Vec<u8>) -> anyhow::Result<u64> {
+async fn dump_nc(ldap: &mut ldap3::Ldap, base: &str, filter: &str, attrs: &[&str], out: &mut Vec<u8>, extras: &Extras) -> anyhow::Result<u64> {
     let adapters: Vec<Box<dyn Adapter<_, _>>> = vec![Box::new(EntriesOnly::new()), Box::new(PagedResults::new(PAGE))];
     // Not critical: servers without the control (non-AD) just ignore it.
     let sd = RawControl { ctype: SD_FLAGS_OID.to_string(), crit: false, val: Some(SD_FLAGS_VALUE.to_vec()) };
@@ -252,10 +263,91 @@ async fn dump_nc(ldap: &mut ldap3::Ldap, base: &str, filter: &str, attrs: &[&str
                 ranged.push((attr, vals));
             }
         }
+        if let Some(x) = extras.get(&e.dn.to_ascii_lowercase()) {
+            ranged.extend(x.iter().cloned());
+        }
         ldif_entry(out, e, &ranged);
         n += 1;
     }
     Ok(n)
+}
+
+/// Concurrent host probes.
+const PROBE_CONCURRENCY: usize = 32;
+
+/// Plain search of `base` returning `(dn, attrs)`.
+async fn find(ldap: &mut ldap3::Ldap, base: &str, filter: &str, attrs: &[&str]) -> anyhow::Result<Vec<SearchEntry>> {
+    let adapters: Vec<Box<dyn Adapter<_, _>>> = vec![Box::new(EntriesOnly::new()), Box::new(PagedResults::new(PAGE))];
+    let mut search = ldap.streaming_search_with(adapters, base, Scope::Subtree, filter, attrs.to_vec()).await?;
+    let mut out = Vec::new();
+    while let Some(re) = search.next().await? {
+        out.push(SearchEntry::construct(re));
+    }
+    search.finish().await.success().map_err(|e| anyhow::anyhow!("search {base}: {e}"))?;
+    Ok(out)
+}
+
+/// Probe enabled computers and enterprise CA hosts (see [`crate::probe`]) and
+/// return the facts as `copperhound-*` attributes for their LDIF entries.
+async fn probe_extras(ldap: &mut ldap3::Ldap, base: &str, config_nc: &str, assume_ntlm: bool) -> anyhow::Result<Extras> {
+    let first = |e: &SearchEntry, k: &str| e.attrs.get(k).and_then(|v| v.first()).cloned();
+    let comps = find(ldap, base, "(&(objectCategory=computer)(dNSHostName=*))", &["dNSHostName", "userAccountControl"]).await?;
+    let cas = if config_nc.is_empty() {
+        Vec::new()
+    } else {
+        find(ldap, config_nc, "(objectClass=pKIEnrollmentService)", &["dNSHostName"]).await.unwrap_or_default()
+    };
+    // host → (computer DN, is DC); host → CA DNs
+    let mut hosts: std::collections::BTreeMap<String, (Option<String>, bool, Vec<String>)> = Default::default();
+    for c in &comps {
+        let uac: u32 = first(c, "userAccountControl").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let Some(h) = first(c, "dNSHostName") else { continue };
+        if uac & 0x2 != 0 {
+            continue; // disabled
+        }
+        let e = hosts.entry(h.to_ascii_lowercase()).or_default();
+        e.0 = Some(c.dn.to_ascii_lowercase());
+        e.1 = uac & 0x2000 != 0;
+    }
+    for ca in &cas {
+        if let Some(h) = first(ca, "dNSHostName") {
+            hosts.entry(h.to_ascii_lowercase()).or_default().2.push(ca.dn.to_ascii_lowercase());
+        }
+    }
+    let jobs: Vec<(String, bool, bool)> = hosts.iter().map(|(h, (_, dc, cas))| (h.clone(), *dc, !cas.is_empty())).collect();
+    tracing::info!("LDAP collector: probing {} hosts", jobs.len());
+    let facts = crate::probe::probe_all(jobs, PROBE_CONCURRENCY).await;
+    let flag = |b: bool| vec![if b { b"TRUE".to_vec() } else { b"FALSE".to_vec() }];
+    let mut extras = Extras::new();
+    for (h, f) in facts {
+        let Some((dn, _, ca_dns)) = hosts.get(&h) else { continue };
+        if let Some(dn) = dn {
+            let x = extras.entry(dn.clone()).or_default();
+            for (attr, v) in [
+                ("copperhound-smbSigning", f.smb_signing_required),
+                ("copperhound-ldapSigning", f.ldap_signing_required),
+                ("copperhound-ldapAvailable", f.ldap_available),
+                ("copperhound-ldapsAvailable", f.ldaps_available),
+            ] {
+                if let Some(v) = v {
+                    x.push((attr.to_string(), flag(v)));
+                }
+            }
+            if assume_ntlm {
+                x.push(("copperhound-ntlmAssumedAllowed".to_string(), flag(true)));
+            }
+        }
+        if let Some(urls) = &f.http_enrollment {
+            for ca in ca_dns {
+                let x = extras.entry(ca.clone()).or_default();
+                x.push(("copperhound-webEnrollmentProbed".to_string(), flag(true)));
+                if !urls.is_empty() {
+                    x.push(("copperhound-httpEnrollment".to_string(), urls.iter().map(|u| u.as_bytes().to_vec()).collect()));
+                }
+            }
+        }
+    }
+    Ok(extras)
 }
 
 /// Run one target: returns `(objects, file name)`.
@@ -269,13 +361,14 @@ pub async fn collect(st: &AppState, t: &Target) -> anyhow::Result<(u64, String)>
     let mut out: Vec<u8> = Vec::new();
     let _ = writeln!(out, "# CopperHound LDAP collector · {} · {} · {}", t.name, dse.dns_host, now_rfc3339());
     out.push(b'\n');
-    let mut n = dump_nc(&mut ldap, &base, "(objectClass=*)", ATTRS, &mut out).await?;
+    let extras = if t.probe { probe_extras(&mut ldap, &base, &dse.config_nc, t.assume_ntlm_allowed).await? } else { Extras::new() };
+    let mut n = dump_nc(&mut ldap, &base, "(objectClass=*)", ATTRS, &mut out, &extras).await?;
     if t.include_configuration && !dse.config_nc.is_empty() {
-        n += dump_nc(&mut ldap, &dse.config_nc, "(objectClass=*)", ATTRS, &mut out).await?;
+        n += dump_nc(&mut ldap, &dse.config_nc, "(objectClass=*)", ATTRS, &mut out, &extras).await?;
     }
     if !dse.schema_nc.is_empty() {
         let f = "(|(lDAPDisplayName=ms-Mcs-AdmPwd)(lDAPDisplayName=msLAPS-Password)(lDAPDisplayName=msLAPS-EncryptedPassword))";
-        n += dump_nc(&mut ldap, &dse.schema_nc, f, &["lDAPDisplayName", "schemaIDGUID", "objectClass"], &mut out).await.unwrap_or(0);
+        n += dump_nc(&mut ldap, &dse.schema_nc, f, &["lDAPDisplayName", "schemaIDGUID", "objectClass"], &mut out, &Extras::new()).await.unwrap_or(0);
     }
     let _ = ldap.unbind().await;
     let name = format!("ldap-{}.ldif.gz", if slug(&t.name).is_empty() { t.id.clone() } else { slug(&t.name) });
@@ -386,6 +479,10 @@ pub struct TargetIn {
     include_configuration: bool,
     #[serde(default = "day")]
     interval_hours: u32,
+    #[serde(default)]
+    probe: bool,
+    #[serde(default)]
+    assume_ntlm_allowed: bool,
 }
 
 fn yes() -> bool {
@@ -441,6 +538,8 @@ pub async fn upsert(State(st): St, Extension(who): Extension<Principal>, Json(r)
             base_dn: r.base_dn.trim().to_string(),
             include_configuration: r.include_configuration,
             interval_hours: r.interval_hours,
+            probe: r.probe,
+            assume_ntlm_allowed: r.probe && r.assume_ntlm_allowed,
             ..base.clone()
         };
         validate(&t)?;
@@ -552,7 +651,7 @@ mod live {
         let dse = root_dse(&mut l).await.expect("rootdse");
         eprintln!("rootdse default nc: {:?}", dse.default_nc);
         let mut out = Vec::new();
-        let n = dump_nc(&mut l, "dc=example,dc=com", "(objectClass=*)", ATTRS, &mut out).await.expect("search");
+        let n = dump_nc(&mut l, "dc=example,dc=com", "(objectClass=*)", ATTRS, &mut out, &Extras::new()).await.expect("search");
         eprintln!("{n} entries, {} bytes LDIF\n{}", out.len(), String::from_utf8_lossy(&out[..out.len().min(400)]));
         assert!(n > 5);
     }

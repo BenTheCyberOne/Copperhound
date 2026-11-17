@@ -6,6 +6,41 @@ Notable changes to CopperHound. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- NTLM relay edges, as in BloodHound CE: `CoerceAndRelayNTLMToSMB`, `CoerceAndRelayNTLMToLDAP`,
+  `CoerceAndRelayNTLMToLDAPS`, `CoerceAndRelayNTLMToADCS` (ESC8) and `CoerceAndRelayNTLMToADCSRPC`
+  (ESC11), from Authenticated Users to each coercible computer, with edge composition naming the relay
+  target. SharpHound's `SmbInfo`, `IsWebClientRunning`, `NTLMRegistryData`, `HttpEnrollmentEndpoints`
+  and CA RPC encryption data are now read.
+- `ADCSESC16` (CA with the SID security extension disabled and requester-specified SANs).
+- `WriteAltSecurityIdentities` (ESC14A), `DCFor`, `DumpSMSAPassword`, `SQLAdmin`,
+  `ClaimSpecialIdentity` and `ProtectAdminGroups` (not traversable). The LDAP reader derives
+  `WritePublicInformation`, `WriteAltSecurityIdentities`, `DumpSMSAPassword` and `SQLAdmin` too.
+- Findings: `ntlm-relay-tier0`, `ntlm-relay-adcs`, `ntlm-relay-ldap`, `ntlm-relay-smb`,
+  `adcs-web-enrollment-relay`, `dc-ldap-relay`, `smb-signing-off`, `adminsdholder-control`.
+- Built-in LDAP collector: opt-in network probes per target (SMB signing, DC LDAP signing, AD CS web
+  enrollment over HTTP) and an "assume outgoing NTLM allowed" option.
+
+- Sessions from logon data: `scripts/Export-CopperHoundLogons.ps1` (Security event 4624, local or
+  forwarded) and Microsoft Defender XDR `DeviceLogonEvents` (JSON or CSV upload). Only logon types
+  that leave credentials count; endpoints must already be in the graph.
+- Session times: each `HasSession` edge records when it was first and last seen, by which source and
+  with which logon types (`sessions.bin`). CHQL `r.lastseen`, `r.firstseen`, `r.sessionsources`,
+  `r.logontypes`; `GET /edges/session`; shown in the edge details.
+- Cost-aware paths: **Optimise for** fewest hops, least effort or stealthiest in the Path tab
+  (`POST /path` `cost`, CLI `path --cost`). Edge costs per kind and profile, a session-age penalty,
+  admin overrides (`GET/PUT /path-costs`), and **Cheapest routes to Tier Zero** in the Exposure tab
+  (`GET /tier0/cheapest`).
+- `session_max_age_days` ingest setting (CLI `--session-max-age-days`): sessions not seen recently stop
+  counting as attack paths.
+
+### Changed
+
+- `WritePublicInformation` is traversable (ESC14A): exposure can rise for existing data. Built-in edge
+  traversability now follows the running release for graphs written earlier.
+- New relay and AD edges need a re-ingest of existing data to appear.
+
 ## [0.3.0] - 2026-11-13
 
 Zone weights and cross-zone planning.

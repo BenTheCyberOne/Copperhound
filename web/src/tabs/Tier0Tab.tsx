@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api/client";
+import { CheapestToTier0 } from "../components/CheapestToTier0";
 import { ExposureReport } from "../components/ExposureReport";
 import { PathHops, hopsOf } from "../components/PathHops";
 import { StatusView } from "../components/StatusView";
@@ -47,6 +48,7 @@ export function Tier0Tab({ active }: { active: boolean }) {
         />
       )}
       {shown && <PathHops hops={hopsOf(shown.result)} nodes={shown.result.nodes} />}
+      {zone === "tier0" && report.data && <CheapestToTier0 key={generation} />}
     </div>
   );
 }

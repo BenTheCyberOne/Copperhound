@@ -92,7 +92,7 @@ const LIMITS: Health["limits"] = {
   max_query_limit: 100000,
   default_query_timeout_ms: 30000,
   max_query_timeout_ms: 300000,
-  upload_extensions: [".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat"],
+  upload_extensions: [".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat", ".csv"],
   max_upload_bytes: 512 * 1024 * 1024,
 };
 
@@ -251,10 +251,17 @@ function path(req: PathRequest): ApiResponse {
   if (!hops) {
     return ok({ nodes: [], edges: [], paths: [], hops: [], truncated: false, elapsed_ms: 0.2, generation: state.generation } satisfies GraphResult);
   }
+  // Demo costs: the mock does not search by cost, it prices the shortest path.
+  const costOf = (kind: string): number =>
+    req.cost === "stealth"
+      ? ({ MemberOf: 0, DCSync: 8, ForceChangePassword: 6, AdminTo: 3, HasSession: 3, AddMember: 3 } as Record<string, number>)[kind] ?? 2
+      : ({ MemberOf: 0, AdminTo: 1, HasSession: 2, GenericAll: 1, AddMember: 1, ForceChangePassword: 1, DCSync: 1, WriteSPN: 4 } as Record<string, number>)[kind] ?? 2;
+  const hopCosts = hops.map((h) => costOf(h.kind));
   return ok(
     resultFrom([from.id], hops, {
       paths: [[from.id, ...hops.map((x) => x.dst)]],
       hops: hops.map((x) => ({ ...x })),
+      ...(req.cost ? { cost: { profile: req.cost, total: hopCosts.reduce((a, b) => a + b, 0), hop_costs: hopCosts } } : {}),
       elapsed_ms: 0.4,
       generation: state.generation,
     }),
@@ -933,6 +940,33 @@ function routeData(req: ApiRequest, who: Principal): ApiResponse {
   }
   if (method === "GET" && p === "/edge-kinds") return ok(edgeKinds());
   if (method === "GET" && p === "/edges/composition") return composition(num("src", -1), num("dst", -1), str("kind") ?? "");
+  if (method === "GET" && p === "/tier0/cheapest") {
+    // Demo: fewest hops to Tier Zero stands in for the cost search.
+    const profile = str("profile") === "stealth" ? "stealth" : "effort";
+    const rows = nodes
+      .filter((n) => !n.tier0 && (n.kind === "User" || n.kind === "Computer"))
+      .flatMap((n) => {
+        const hops = shortestPath(n.id, (id) => nodes[id]!.tier0, { exclude: new Set<string>(), allEdges: false });
+        return hops ? [{ node: publicNode(n), cost: hops.reduce((a, h) => a + (h.kind === "MemberOf" ? 0 : profile === "stealth" ? 3 : 2), 0) }] : [];
+      })
+      .sort((a, b) => a.cost - b.cost || a.node.name.localeCompare(b.node.name));
+    const counts = new Map<number, number>();
+    for (const r of rows) counts.set(r.cost, (counts.get(r.cost) ?? 0) + 1);
+    return ok({
+      profile,
+      items: rows.slice(0, num("limit", 25)),
+      reachable: rows.length,
+      by_cost: [...counts].sort((a, b) => a[0] - b[0]).map(([cost, count]) => ({ cost, count })),
+      session_reference: 0,
+      elapsed_ms: 3,
+      generation: state.generation,
+    });
+  }
+  if (method === "GET" && p === "/edges/session") {
+    // Demo data: every session was last seen by Defender XDR two days ago.
+    const t = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 19) + "Z";
+    return ok({ src: num("src", -1), dst: num("dst", -1), first_seen: t, last_seen: t, sources: ["defender"], logon_types: [10] });
+  }
   if (method === "GET" && p === "/node-kinds") return ok(nodeKinds());
   if (method === "GET" && p === "/uploads") return ok(uploadsWithSources(uploads));
   if (method === "GET" && p === "/sources") return ok(sourcesResponse(state.generation));

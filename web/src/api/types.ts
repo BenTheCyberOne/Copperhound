@@ -78,6 +78,8 @@ export interface GraphResult {
   network?: boolean;
   /** POST /path with network: true: the network zone of each path node (null: none). */
   zones?: (string | null)[];
+  /** POST /path with cost: the profile, the path's total cost and each hop's cost. */
+  cost?: { profile: CostProfile; total: number; hop_costs: number[] };
   truncated: boolean;
   elapsed_ms: number;
   /** /path, /query, /subgraph (v1.1). */
@@ -158,6 +160,20 @@ export interface PathRequest {
   all?: boolean;
   /** Only paths the network conduits allow (one path; docs/OT.md). */
   network?: boolean;
+  /** Cheapest path by edge cost instead of fewest hops (one path). */
+  cost?: CostProfile;
+}
+
+export type CostProfile = "effort" | "stealth";
+
+/** GET /tier0/cheapest */
+export interface CheapestResponse {
+  profile: CostProfile;
+  items: { node: Node; cost: number }[];
+  /** Principals outside Tier Zero with any path to it. */
+  reachable: number;
+  by_cost: { cost: number; count: number }[];
+  elapsed_ms: number;
 }
 
 /** Network conduits between zones (docs/OT.md, "Network reachability"). */
@@ -278,6 +294,18 @@ export interface EdgeComposition extends GraphResult {
   complete: boolean;
 }
 
+/** GET /edges/session: when and how a HasSession edge was seen. */
+export interface EdgeSession {
+  src: NodeId;
+  dst: NodeId;
+  first_seen: string | null;
+  last_seen: string | null;
+  /** sessions, privileged-sessions, registry-sessions, logon-events, defender */
+  sources: string[];
+  /** Windows logon types seen (2 interactive, 10 remote interactive, ...). */
+  logon_types: number[];
+}
+
 export interface NodeKindInfo {
   name: string;
   category: KindCategory;
@@ -363,6 +391,10 @@ export interface LdapTargetInput {
   base_dn: string;
   include_configuration: boolean;
   interval_hours: number;
+  /** Probe computers over the network for NTLM relay facts (opt-in). */
+  probe?: boolean;
+  /** With probe: record outgoing NTLM as allowed (the Windows default). */
+  assume_ntlm_allowed?: boolean;
 }
 
 export interface LdapTarget extends Omit<LdapTargetInput, "password"> {
@@ -958,6 +990,8 @@ export interface IngestSettings {
   merge_policy: MergePolicy;
   /** newest only: keep HasSession edges up to N hours older than a computer's newest session data. 0-8760. */
   session_window_hours: number;
+  /** Drop sessions last seen more than N days before the newest time in the input. 0 = no limit. 0-3650. */
+  session_max_age_days?: number;
 }
 
 export interface ServerSettings {

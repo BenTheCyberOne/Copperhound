@@ -255,6 +255,13 @@ is read until queried.
 Memory: `Graph::build` peaks at ≈ 12 B/edge (raw edges) + 8 B/edge (packed
 adjacency) plus node columns. 1B edges ≈ 20 GB peak.
 
+`sessions.bin` (optional; absent in graphs written before 0.4.0): one 32-byte
+`SessionMeta` per `HasSession` edge with a record — computer, user, first and
+last time seen, source bits and logon-type bits — sorted by
+`(computer, user)` for binary search. Ingest builds it in the merge
+(`resolve_sessions`, `age_out_sessions` in `crates/ingest/src/merge.rs`) and
+renumbers it with the nodes.
+
 ### Property columns (format 3)
 
 Collector properties are kept per node as JSON text (`props.blob`): fine for
@@ -356,6 +363,14 @@ listed in docs/CHQL.md, "Predicate pushdown".
   pass (Brandes-style) accumulating per-edge principal counts into a top-k
   heap. O(V + E), ~20 B/node scratch.
 - **reach** — forward BFS blast radius.
+- **cost** (`ch_engine::cost`) — per-edge integer costs from the edge kind
+  (two profiles, admin overrides) plus a session-age penalty read from
+  `sessions.bin`. `cheapest_path` is Dijkstra from the sources to the first
+  target settled, ordered by `(cost, hops)` so ties are deterministic;
+  `cost_to_targets` is the reverse Dijkstra behind `/tier0/cheapest`. Both are
+  checked against a Bellman-Ford reference on random graphs, and with every
+  cost 1 they agree with BFS hop counts. Exposure, choke points and the
+  remediation planner stay hop- and reachability-based.
 - **remediation planner** (`ch_analysis::simulate::plan`) — a parallel reverse
   BFS from the zone, then the reachable attack graph is extracted once into
   compact CSR arrays. The *core* (nodes that have attackers) is renumbered in
@@ -400,7 +415,9 @@ one target set. `EdgeFilter::unified_tier0(false)` (server setting
 objects, measuring each realm separately.
 
 Known simplifications:
-- ESC8 (`CoerceAndRelayNTLMToADCS`) is not derived yet.
+- NTLM relay edges need the outgoing NTLM policy (SharpHound `NTLMRegistryData`)
+  and treat a missing value as restricted. The WebClient service and LDAPS
+  channel binding are not probed by the built-in collector.
 - Azure Tier Zero is the seed set: tenants, plus the GA / PRA / PAA / Partner
   Tier2 / Hybrid Identity Admin / Directory Synchronization Accounts roles.
   Role holders and privileged-permission service principals are not expanded
@@ -433,9 +450,7 @@ and `/nodes/filter` waits.
 
 ## Roadmap
 
-- **Open for a contributor:** ESC8 / NTLM-relay edges. Add the edge kind(s)
-  in `crates/model/src/lib.rs` and a derivation pass under
-  `crates/ingest/src/postprocess/`, alongside the existing ADCS passes.
+- ~~ESC8 / NTLM-relay edges~~ — done in 0.4.0 (`postprocess/ntlm.rs`, `adcs.rs`).
 - Graph generation id + query cancellation in the API; streaming results
 - CHQL: multiple patterns, `ORDER BY`, `WITH`, undirected hops
 - ~~Property columns for fast filtering at 100M+ nodes~~ — done (`columns.rs`).

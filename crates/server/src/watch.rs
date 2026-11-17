@@ -71,11 +71,14 @@ pub struct IngestSettings {
     /// `newest` only: also keep sessions from older collections up to this
     /// many hours older than a computer's newest session data (0 = newest only).
     pub session_window_hours: u64,
+    /// Drop sessions last seen more than this many days before the newest
+    /// time in the input (0 = no limit). Sessions with no known time stay.
+    pub session_max_age_days: u64,
 }
 
 impl Default for IngestSettings {
     fn default() -> Self {
-        IngestSettings { merge_policy: ch_ingest::MergePolicy::Newest, session_window_hours: 0 }
+        IngestSettings { merge_policy: ch_ingest::MergePolicy::Newest, session_window_hours: 0, session_max_age_days: 0 }
     }
 }
 
@@ -84,6 +87,7 @@ impl IngestSettings {
         ch_ingest::IngestOptions {
             merge_policy: self.merge_policy,
             session_window_secs: self.session_window_hours.saturating_mul(3600),
+            session_max_age_secs: self.session_max_age_days.saturating_mul(86_400),
             ..Default::default()
         }
     }
@@ -292,6 +296,9 @@ pub async fn put_settings(State(st): St, Json(new): Json<Settings>) -> Result<Js
     }
     if new.ingest.session_window_hours > 24 * 365 {
         return Err(ApiError::bad("ingest.session_window_hours must be 0-8760"));
+    }
+    if new.ingest.session_max_age_days > 3650 {
+        return Err(ApiError::bad("ingest.session_max_age_days must be 0-3650"));
     }
     let dir = watch_dir(&st, &new.watch);
     if new.watch.enabled {

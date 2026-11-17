@@ -198,6 +198,17 @@ input[type="number"] {
   cursor: pointer;
   user-select: none;
 }
+/* Long labels wrap: keep the box full size and level with the first line. */
+.toggle > input,
+.check > input {
+  flex-shrink: 0;
+}
+.toggle.multiline {
+  align-items: flex-start;
+}
+.toggle.multiline > input {
+  margin-top: 3px;
+}
 
 .muted {
   color: var(--text-muted);
@@ -2513,8 +2524,11 @@ button.legend-item.is-hidden .legend-kind {
   align-items: center;
   font-weight: 400;
 }
-.form-stack label.role-option {
+.form-stack label.role-option,
+.form-stack label.toggle.multiline {
   align-items: flex-start;
+}
+.form-stack label.role-option {
   flex-wrap: wrap;
 }
 
@@ -2794,6 +2808,21 @@ details.deliveries summary {
   align-items: flex-start;
   gap: 6px;
 }
+.session-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0 0;
+}
+.session-info dt {
+  color: var(--text-muted);
+}
+.session-info dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .derivation {
   display: flex;
   flex-direction: column;
@@ -2890,6 +2919,39 @@ details.deliveries summary {
   padding: 2px 8px;
   font-size: 12px;
   background: transparent;
+}
+.cheapest {
+  margin-top: 12px;
+}
+.cheapest > .seg {
+  margin: 4px 0 6px;
+}
+.cheapest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cheapest-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cheapest-list .hop-node {
+  flex: 1;
+  min-width: 0;
+}
+.cheapest-list .hop-cost {
+  margin-left: 0;
+  min-width: 2.2em;
+  text-align: center;
+}
+.hop-cost {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
 }
 .seg button.on {
   background: var(--accent-soft);

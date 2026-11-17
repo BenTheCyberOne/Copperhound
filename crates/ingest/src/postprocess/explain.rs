@@ -14,6 +14,7 @@
 
 use super::ad::{domain_of, netbios_name, sam_of, trust_pairs};
 use super::adcs::{self, Why};
+use super::ntlm::{self, Relay};
 use super::azure::{self, role};
 use super::repl::is_everyone;
 use super::Forests;
@@ -40,6 +41,15 @@ pub const COMPOSITE_KINDS: &[&str] = &[
     "ADCSESC10a",
     "ADCSESC10b",
     "ADCSESC13",
+    "ADCSESC16",
+    "CoerceAndRelayNTLMToSMB",
+    "CoerceAndRelayNTLMToLDAP",
+    "CoerceAndRelayNTLMToLDAPS",
+    "CoerceAndRelayNTLMToADCS",
+    "CoerceAndRelayNTLMToADCSRPC",
+    "DCFor",
+    "ClaimSpecialIdentity",
+    "ProtectAdminGroups",
     "AZGlobalAdmin",
     "AZPrivilegedRoleAdmin",
     "AZPrivilegedAuthAdmin",
@@ -101,6 +111,10 @@ pub fn compose(g: &Graph, src: u32, dst: u32, kind: u16) -> Option<Composition> 
         "SyncedToEntraUser" | "SyncedToADUser" | "SyncedToEntraGroup" | "SyncedToADGroup" => b.synced(src, dst, &name),
         "EntraConnectCredentials" => b.connect_credentials(src, dst),
         "SeamlessSSO" => b.seamless_sso(src, dst),
+        "CoerceAndRelayNTLMToSMB" | "CoerceAndRelayNTLMToLDAP" | "CoerceAndRelayNTLMToLDAPS" => b.relay(src, dst, kind, &name),
+        "DCFor" => b.dc_for(src, dst),
+        "ClaimSpecialIdentity" => b.special_identity(src, dst),
+        "ProtectAdminGroups" => b.adminsdholder(src, dst),
         n if n.starts_with("AZMG") => b.ms_graph(src, dst, n),
         n if n.starts_with("AZ") => b.azure_role(src, dst, n),
         _ => b.adcs(src, dst, kind, &name),
@@ -423,6 +437,110 @@ impl<'g> B<'g> {
         self.note(msg);
     }
 
+    // ----------------------------------------------------------- NTLM relay
+
+    /// Facts every relay victim needs: enabled, outgoing NTLM not restricted,
+    /// and the edge starts at Authenticated Users of its domain.
+    fn relay_victim(&mut self, au: u32, v: u32) {
+        let p = props(self.g, v);
+        if self.g.has_flag(v, flags::ENABLED) && p.get("restrictoutboundntlm").and_then(Value::as_bool) == Some(false) {
+            let msg = format!("{} is enabled and does not restrict outgoing NTLM (restrictoutboundntlm = false).", self.name(v));
+            self.note(msg);
+            if p.get("restrictoutboundntlmassumed").and_then(Value::as_bool) == Some(true) {
+                let msg = "The outgoing NTLM policy was not collected; the collector target assumes the Windows default (allowed).";
+                self.note(msg);
+            }
+        } else {
+            let msg = format!("{} enabled, with restrictoutboundntlm = false", self.name(v));
+            self.missing(msg);
+        }
+        let msg = format!(
+            "Any member of {} (every authenticated principal) can coerce {} to authenticate (PetitPotam, PrinterBug, DFSCoerce or WebDAV).",
+            self.name(au),
+            self.name(v)
+        );
+        self.note(msg);
+    }
+
+    fn relay(&mut self, au: u32, v: u32, kind: u16, name: &str) {
+        self.relay_victim(au, v);
+        let whys = ntlm::witnesses(self.g, (au, v, kind));
+        let Some(&why) = whys.first() else {
+            return self.missing("the relay rule match (re-ingest may be needed)");
+        };
+        match why {
+            Relay::Smb { host } => {
+                self.holds(v, host, &["AdminTo"]);
+                let msg = format!("{} does not require SMB signing (smbsigning = false).", self.name(host));
+                self.note(msg);
+            }
+            Relay::Ldap { dc } => {
+                self.node(dc);
+                let msg = format!("{} runs the WebClient service (webclientrunning = true): WebDAV coercion yields NTLM over HTTP.", self.name(v));
+                self.note(msg);
+                let p = props(self.g, dc);
+                let fact = if name == "CoerceAndRelayNTLMToLDAP" {
+                    format!(
+                        "Domain controller {} accepts LDAP without signing (ldapsigning = {}).",
+                        self.name(dc),
+                        prop_text(&p, "ldapsigning").unwrap_or_default()
+                    )
+                } else {
+                    format!(
+                        "Domain controller {} accepts LDAPS without channel binding (ldapsepa = {}).",
+                        self.name(dc),
+                        prop_text(&p, "ldapsepa").unwrap_or_default()
+                    )
+                };
+                self.note(fact);
+            }
+        }
+    }
+
+    fn dc_for(&mut self, c: u32, d: u32) {
+        let g = self.g;
+        let in_group = g.lookup(&format!("{}-516", g.oid(d))).is_some_and(|grp| self.edge_if(c, grp, "MemberOf"));
+        let p = props(g, c);
+        if in_group {
+            return;
+        }
+        if p.get("isdc").and_then(Value::as_bool) == Some(true) && domain_of(g, c) == Some(d) {
+            let msg = format!("{} is a domain controller of {} (isdc = true).", self.name(c), self.name(d));
+            self.note(msg);
+        } else {
+            let msg = format!("{} as a domain controller of {}", self.name(c), self.name(d));
+            self.missing(msg);
+        }
+    }
+
+    fn special_identity(&mut self, s: u32, d: u32) {
+        let msg = if self.g.kind(d) == NodeKind::User {
+            format!("{} is the enabled Guest account: anyone ({}) can log on with it.", self.name(d), self.name(s))
+        } else {
+            format!(
+                "{} is a special identity: Windows adds it to the token at logon (by protocol or logon type), so every member of {} can obtain it.",
+                self.name(d),
+                self.name(s)
+            )
+        };
+        self.note(msg);
+    }
+
+    fn adminsdholder(&mut self, h: u32, x: u32) {
+        let p = props(self.g, x);
+        if p.get("adminsdholderprotected").and_then(Value::as_bool) == Some(true) {
+            let msg = format!(
+                "{} is protected by AdminSDHolder (adminsdholderprotected = true): the ProtectAdminGroups task copies the DACL of {} onto it.",
+                self.name(x),
+                self.name(h)
+            );
+            self.note(msg);
+        } else {
+            let msg = format!("{} marked adminsdholderprotected", self.name(x));
+            self.missing(msg);
+        }
+    }
+
     // ---------------------------------------------------------- ADCS rules
 
     /// The target domain's CA chain: an enabled host, the chain to a root CA
@@ -587,6 +705,15 @@ impl<'g> B<'g> {
                         self.template_facts(t, &["schannelauthenticationenabled", "requiresmanagerapproval"]);
                         self.dc_fact(d, true);
                     }
+                    "ADCSESC16" => {
+                        self.ca_san_fact(e);
+                        let msg = format!(
+                            "{} leaves the SID security extension (1.3.6.1.4.1.311.25.2) out of every certificate (disabledextensions).",
+                            self.name(e)
+                        );
+                        self.note(msg);
+                        self.template_facts(t, &["requiresmanagerapproval", "authenticationenabled", "schemaversion", "authorizedsignatures"]);
+                    }
                     "ADCSESC13" => {
                         let ip = self.targets(t, "ExtendedByPolicy").into_iter().find(|&ip| self.targets(ip, "OIDGroupLink").contains(&d));
                         match ip {
@@ -643,6 +770,37 @@ impl<'g> B<'g> {
                     self.name(victim)
                 );
                 self.note(msg);
+            }
+            Why::Relay { e, t } => {
+                self.relay_victim(s, d);
+                self.template_enroll(d, t);
+                self.ca_enroll(d, e);
+                self.require_edge(t, e, "PublishedTo");
+                match self.chained_domain(e) {
+                    Some(dom) => self.ca_chain(e, dom),
+                    None => {
+                        let msg = format!("a domain {} is trusted for", self.name(e));
+                        self.missing(msg);
+                    }
+                }
+                let p = props(self.g, e);
+                let msg = if name == "CoerceAndRelayNTLMToADCS" {
+                    let mut eps: Vec<String> = Vec::new();
+                    for k in ["httpenrollmentendpoints", "httpsenrollmentendpoints"] {
+                        if let Some(a) = p.get(k).and_then(Value::as_array) {
+                            eps.extend(a.iter().filter_map(Value::as_str).map(str::to_string));
+                        }
+                    }
+                    format!(
+                        "{} accepts NTLM on web enrollment over HTTP or HTTPS without Extended Protection: {}.",
+                        self.name(e),
+                        if eps.is_empty() { "hasvulnerableendpoint = true".to_string() } else { eps.join(", ") }
+                    )
+                } else {
+                    format!("{} does not enforce RPC request encryption (rpcencryptionenforced = false).", self.name(e))
+                };
+                self.note(msg);
+                self.template_facts(t, &["requiresmanagerapproval", "authenticationenabled", "schemaversion", "authorizedsignatures"]);
             }
             Why::Esc3 { e, ct1, ct2, eca1, agents } => {
                 self.template_enroll(s, ct1);

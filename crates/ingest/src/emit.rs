@@ -267,10 +267,37 @@ pub struct NameEdge {
     pub kind: u16,
 }
 
+/// A session endpoint as a logon record names it.
+#[derive(Debug, Clone)]
+pub enum ObsRef {
+    /// Already interned (collector records that hinted the object).
+    Id(u32),
+    /// Object id (SID); matched only if some record defines or references it.
+    Oid(Box<str>),
+    /// Upper-cased display name (computer DNS name).
+    Name(Box<str>),
+}
+
+/// One session observation (see [`ch_store::SessionMeta`]). Times are unix
+/// seconds, 0 when unknown (filled from the source's collection time).
+#[derive(Debug, Clone)]
+pub struct SessionObs {
+    pub computer: ObsRef,
+    pub user: ObsRef,
+    pub first: i64,
+    pub last: i64,
+    pub sources: u16,
+    pub logon_types: u16,
+    /// From logon data: the merge adds the `HasSession` edge itself.
+    pub add_edge: bool,
+}
+
 #[derive(Default)]
 pub struct Emitted {
     /// Edges with at least one end addressed by name.
     pub name_edges: Vec<NameEdge>,
+    /// Session observations (collector sessions and logon data).
+    pub sessions: Vec<SessionObs>,
     pub edges: Vec<Edge>,
     pub updates: Vec<NodeUpdate>,
     /// Indices into `updates` whose kind awaits file-level resolution.
@@ -551,6 +578,11 @@ impl<'a> Emitter<'a> {
             }
             self.out.edges.push(e);
         }
+    }
+
+    /// Record a session observation.
+    pub fn session(&mut self, obs: SessionObs) {
+        self.out.sessions.push(obs);
     }
 
     #[inline]

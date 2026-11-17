@@ -26,6 +26,7 @@ pub mod de;
 pub mod emit;
 pub mod ldap;
 pub mod ldapdomaindump;
+pub mod logons;
 pub mod merge;
 pub mod opengraph;
 pub mod pipeline;
@@ -87,6 +88,10 @@ pub struct IngestOptions {
     /// within this many seconds of the newest session collection of the same
     /// computer. 0 (default): sessions of the newest collection only.
     pub session_window_secs: u64,
+    /// Drop sessions last seen more than this many seconds before the newest
+    /// time in the input (collection times and logon times). 0 (default): no
+    /// limit. Sessions with no known time are kept.
+    pub session_max_age_secs: u64,
 }
 
 impl Default for IngestOptions {
@@ -97,6 +102,7 @@ impl Default for IngestOptions {
             keep_props: true,
             merge_policy: MergePolicy::Newest,
             session_window_secs: 0,
+            session_max_age_secs: 0,
         }
     }
 }
@@ -126,6 +132,15 @@ pub struct IngestReport {
     pub name_edges_resolved: u64,
     #[serde(skip_serializing_if = "is_zero")]
     pub name_edges_unresolved: u64,
+    /// Session observations from logon data matched to a computer and a user
+    /// in the graph, and dropped because an end was missing.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub logon_sessions_matched: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub logon_sessions_unmatched: u64,
+    /// Sessions dropped by `session_max_age_secs`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sessions_aged_out: u64,
     /// Custom (OpenGraph) node kinds registered.
     #[serde(skip_serializing_if = "is_zero_usize")]
     pub custom_node_kinds: usize,
@@ -202,7 +217,7 @@ fn collect_inputs(p: &Path, root: &Path, jsons: &mut Vec<InFile>, zips: &mut Vec
 /// Zip entries worth extracting: collector JSON and raw directory dumps.
 fn wanted_zip_entry(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
-    [".json", ".ldif", ".ldf", ".gz", ".dat"].iter().any(|x| l.ends_with(x))
+    [".json", ".ldif", ".ldf", ".gz", ".dat", ".csv"].iter().any(|x| l.ends_with(x))
 }
 
 fn mtime(p: &Path) -> Option<String> {
@@ -339,6 +354,10 @@ enum Format {
     AzureHound,
     /// BloodHound CE OpenGraph (`{"graph": {"nodes", "edges"}}`), parsed whole.
     OpenGraph,
+    /// CopperHound logon export (`meta.type` `copperhound-logons`).
+    Logons,
+    /// Defender XDR `DeviceLogonEvents` as a JSON array.
+    Defender,
 }
 
 impl Format {
@@ -348,6 +367,8 @@ impl Format {
             Format::LdapDomainDump => "ldapdomaindump",
             Format::AzureHound => "azurehound",
             Format::OpenGraph => "opengraph",
+            Format::Logons => "logons",
+            Format::Defender => "defender",
         }
     }
 }
@@ -374,6 +395,8 @@ fn parse_batch(
             Format::AzureHound => serde_json::from_slice::<azurehound::Record>(bytes)
                 .map(|r| azurehound::extract(r, &mut em)),
             Format::OpenGraph => serde_json::from_slice::<opengraph::File>(bytes).map(|f| opengraph::extract(f, &mut em)),
+            Format::Logons => logons::extract(bytes, &mut em),
+            Format::Defender => serde_json::from_slice::<logons::DefenderRecord>(bytes).map(|r| logons::extract_defender(r, &mut em)),
         };
         if let Err(err) = res {
             em.error(|| format!("{file} @ byte {s}: {err}"));
@@ -435,7 +458,9 @@ fn scan_file(path: &Path, source: u32) -> Result<Option<ScannedFile>> {
         .and_then(|m| m.ty);
     let ranges = summary.ranges;
     let format = match layout {
+        Layout::Array if ranges.first().is_some_and(|&(s, e)| logons::looks_like_defender(&map[s..e])) => Format::Defender,
         Layout::Array => Format::LdapDomainDump,
+        Layout::Wrapped if meta_type.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("copperhound-logons")) => Format::Logons,
         Layout::Wrapped
             if meta_type.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("azure"))
                 || ranges.first().is_some_and(|&(s, e)| looks_like_azurehound(&map[s..e])) =>
@@ -446,7 +471,7 @@ fn scan_file(path: &Path, source: u32) -> Result<Option<ScannedFile>> {
     };
     // Kind from the file name, else from `meta.type` (v6 writes meta after data).
     // AzureHound files mix kinds; each record carries its own.
-    let kind = if format == Format::AzureHound {
+    let kind = if matches!(format, Format::AzureHound | Format::Logons | Format::Defender) {
         None
     } else {
         NodeKind::from_file_name(&display).or_else(|| {
@@ -547,6 +572,7 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
     let mut jsons = Vec::new();
     let mut zips = Vec::new();
     let mut others = Vec::new();
+    let mut csvs: Vec<InFile> = Vec::new();
     for p in inputs {
         let root = if p.is_dir() { p.as_path() } else { p.parent().unwrap_or(Path::new("")) };
         collect_inputs(p, root, &mut jsons, &mut zips, &mut others)?;
@@ -561,6 +587,10 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
         }
         scan::InputKind::Zip => {
             zips.push(InFile { path: f.path.clone(), rel: f.rel.clone() });
+            false
+        }
+        scan::InputKind::Csv => {
+            csvs.push(InFile { path: f.path.clone(), rel: f.rel.clone() });
             false
         }
         _ => true,
@@ -578,6 +608,7 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
     };
     let mut json_files: Vec<(PathBuf, u32)> =
         jsons.iter().map(|f| (f.path.clone(), add_source(&mut sources, f, "json"))).collect();
+    let mut csv_files: Vec<(PathBuf, u32)> = csvs.iter().map(|f| (f.path.clone(), add_source(&mut sources, f, "defender-csv"))).collect();
     let mut raw_files: Vec<(PathBuf, scan::InputKind, u32)> = raw
         .iter()
         .map(|(f, k)| {
@@ -605,6 +636,10 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
         for (p, src) in extracted {
             match scan::detect(&p) {
                 Some(scan::InputKind::Json) => json_files.push((p, src)),
+                Some(scan::InputKind::Csv) => {
+                    sources[src as usize].format = "defender-csv";
+                    csv_files.push((p, src))
+                }
                 Some(k @ (scan::InputKind::Ldif | scan::InputKind::Gzip | scan::InputKind::AdExplorer)) => {
                     sources[src as usize].format = if k == scan::InputKind::AdExplorer { "adexplorer" } else { "ldif" };
                     raw_files.push((p, k, src))
@@ -622,6 +657,9 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
     }
     for f in raw_files.iter_mut() {
         f.2 = remap[f.2 as usize];
+    }
+    for f in csv_files.iter_mut() {
+        f.1 = remap[f.1 as usize];
     }
     raw_files.sort_by_key(|f| f.2);
     // Open raw dumps (gzip LDIF is decompressed into the temp dir).
@@ -644,7 +682,7 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
         sources[i.source as usize].t_snapshot = i.header_time();
     }
     report.extract_secs = t.elapsed().as_secs_f64();
-    if json_files.is_empty() && ldap_inputs.is_empty() {
+    if json_files.is_empty() && ldap_inputs.is_empty() && csv_files.is_empty() {
         if let Some(e) = ldap_errors.lock().first() {
             bail!("no readable collector files: {e}");
         }
@@ -657,7 +695,7 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
         .map(|(p, s)| (fs::metadata(&p).map(|m| m.len()).unwrap_or(0), p, s))
         .collect();
     sized.sort_by_key(|s| std::cmp::Reverse(s.0));
-    report.files = sized.len() + ldap_inputs.len();
+    report.files = sized.len() + ldap_inputs.len() + csv_files.len();
     report.bytes = sized.iter().map(|s| s.0).sum::<u64>() + ldap_inputs.iter().map(|i| i.len()).sum::<u64>();
 
     let t = Instant::now();
@@ -676,6 +714,15 @@ pub fn ingest_with_progress(inputs: &[PathBuf], opts: &IngestOptions, progress: 
         outputs.extend(o);
         report.scan_secs += s.index_secs;
         ldap_stats = s;
+    }
+    for (p, src) in &csv_files {
+        match fs::read(p) {
+            Ok(bytes) => {
+                report.bytes += bytes.len() as u64;
+                outputs.push(logons::ingest_csv(&bytes, &shared, *src, &p.display().to_string()));
+            }
+            Err(e) => file_errors.lock().push(format!("{}: {e}", p.display())),
+        }
     }
     progress("merging", 52);
     drop(ldap_inputs); // unmap before the temp dir is removed

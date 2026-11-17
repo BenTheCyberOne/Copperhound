@@ -39,7 +39,7 @@ fn long_operator_chains_are_rejected() {
 
 fn tiny_graph() -> ch_store::Graph {
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-    ch_store::Graph::build(ch_store::GraphParts {
+    ch_store::Graph::build(ch_store::GraphParts { sessions: Vec::new(),
         kinds: vec![1],
         flags: vec![0],
         names: vec![Some("A@X".into())],

@@ -303,7 +303,7 @@ mod tests {
         targets.sort_unstable();
         targets.dedup();
         let zone_of = kinds.iter().map(|&k| if k == 3 && r.below(5) != 0 { r.below(zones as u64) as u16 } else { NO_ZONE }).collect();
-        let g = Graph::build(GraphParts {
+        let g = Graph::build(GraphParts { sessions: Vec::new(),
             kinds,
             flags: fl,
             names: vec![None; n as usize],
@@ -386,7 +386,7 @@ mod tests {
         // 0 user -AdminTo-> 1 host(Z1) -HasSession-> 2 user ; 1 -CanProgram-> 3 plc(Z2)
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
         let edges = vec![Edge::new(0, 1, ek::ADMIN_TO), Edge::new(1, 2, ek::HAS_SESSION), Edge::new(1, 3, ek_of("CanProgram"))];
-        let (g, _) = Graph::build(GraphParts {
+        let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![1, 3, 1, 0],
             flags: vec![0, 0, 0, flags::TIER0],
             names: vec![None; 4],

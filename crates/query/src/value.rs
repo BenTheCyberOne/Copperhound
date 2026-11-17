@@ -417,12 +417,28 @@ pub fn node_prop(g: &Graph, id: u32, key: &str) -> Val {
 }
 
 /// Property of any value; `key` lower-case.
+/// `HasSession` metadata: `lastseen` / `firstseen` (unix seconds),
+/// `sessionsources` (names) and `logontypes` (numbers). `null` when the graph
+/// has no record of the session or the value is unknown.
+fn session_prop(g: &Graph, e: &E, key: &str) -> Val {
+    let Some(m) = g.session(e.0, e.1) else { return Val::Null };
+    let time = |t: i64| if t > 0 { Val::Num(t as f64) } else { Val::Null };
+    match key {
+        "lastseen" => time(m.last_seen),
+        "firstseen" => time(m.first_seen),
+        "sessionsources" => Val::List(ch_store::session_source::names(m.sources).into_iter().map(|s| Val::Str(s.to_string())).collect()),
+        _ if m.logon_types == 0 => Val::Null,
+        _ => Val::List((0..16).filter(|t| m.logon_types & (1 << t) != 0).map(|t| Val::Num(t as f64)).collect()),
+    }
+}
+
 pub fn val_prop(g: &Graph, v: &Val, key: &str) -> Val {
     match v {
         Val::Node(id) => node_prop(g, *id, key),
         Val::Edge(e) => match key {
             "kind" | "type" | "label" => Val::Str(g.edge_kind_name(e.2).to_string()),
             "traversable" => Val::Bool(g.is_traversable(e.2)),
+            "lastseen" | "firstseen" | "sessionsources" | "logontypes" if e.2 == ch_model::ek::HAS_SESSION => session_prop(g, e, key),
             _ => Val::Null,
         },
         Val::Edges(es) => match key {

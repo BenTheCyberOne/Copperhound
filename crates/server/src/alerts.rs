@@ -615,7 +615,7 @@ mod tests {
         use ch_model::{ek, flags};
         use ch_store::{Edge, GraphParts};
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        Graph::build(GraphParts {
+        Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![1, 2, 3, 1, 2, 1],
             flags: vec![0, 0, 0, 0, flags::TIER0, 0],
             names: ["ALICE", "HELPDESK", "WS", "BOB", "DA", "CAROL"].iter().map(|n| Some(n.to_string())).collect(),

@@ -229,6 +229,9 @@ pub mod g {
     pub const PKI_NAME_FLAG: Guid = guid("ea1dddc4-60ff-416e-8cc0-17cee534bce7");
     pub const ENROLL: Guid = guid("0e10c968-78fb-11d2-90d4-00c04f79dc55");
     pub const GP_LINK: Guid = guid("f30e3bc1-9ff0-11d1-b603-0000f80367c1");
+    /// Public-Information property set (includes altSecurityIdentities, userPrincipalName).
+    pub const PUBLIC_INFORMATION: Guid = guid("e48d0154-bcf8-11d1-8702-00c04fb96050");
+    pub const ALT_SECURITY_IDENTITIES: Guid = guid("00fbf30c-91fe-11d1-aebc-0000f80367c1");
 
     // schemaIDGUIDs of the structural classes (for inherited object types)
     pub const C_USER: Guid = guid("bf967aba-0de6-11d0-a285-00aa003049e2");
@@ -359,6 +362,8 @@ pub fn ace_rights(ace: &Ace, t: &Target, out: &mut Vec<&'static str>) {
                 K::User | K::Computer if ot == g::KEY_CREDENTIAL_LINK => out.push("AddKeyCredentialLink"),
                 K::Computer if ot == g::ALLOWED_TO_ACT => out.push("AddAllowedToAct"),
                 K::Computer if ot == g::USER_ACCOUNT_RESTRICTIONS => out.push("WriteAccountRestrictions"),
+                K::User | K::Computer if ot == g::PUBLIC_INFORMATION => out.push("WritePublicInformation"),
+                K::User | K::Computer if ot == g::ALT_SECURITY_IDENTITIES => out.push("WriteAltSecurityIdentities"),
                 K::Group if ot == g::MEMBER => out.push("AddMember"),
                 K::CertTemplate if ot == g::PKI_ENROLLMENT_FLAG => out.push("WritePKIEnrollmentFlag"),
                 K::CertTemplate if ot == g::PKI_NAME_FLAG => out.push("WritePKINameFlag"),
@@ -522,5 +527,35 @@ mod tests {
             })
             .collect();
         assert_eq!(rights, vec![vec!["GenericAll"], vec!["AddMember"], vec!["WriteDacl"], vec![]]);
+    }
+
+    /// ESC14 rights: the Public-Information property set and altSecurityIdentities
+    /// on users and computers; neither applies to a group.
+    #[test]
+    fn alt_security_identities_rights() {
+        let d = "S-1-5-21-1-2-3";
+        let sd = build_sd(
+            &format!("{d}-512"),
+            &[
+                (ACCESS_ALLOWED_OBJECT, 0, RIGHT_DS_WRITE_PROPERTY, Some(g::PUBLIC_INFORMATION), &format!("{d}-1101")),
+                (ACCESS_ALLOWED_OBJECT, 0, RIGHT_DS_WRITE_PROPERTY, Some(g::ALT_SECURITY_IDENTITIES), &format!("{d}-1102")),
+            ],
+        );
+        let p = parse(&sd).unwrap();
+        let rights = |kind: NodeKind, class: Guid| -> Vec<Vec<&'static str>> {
+            let t = Target { kind, class: Some(class), has_laps: false, laps: &[] };
+            p.dacl
+                .iter()
+                .map(|a| {
+                    let mut v = Vec::new();
+                    ace_rights(a, &t, &mut v);
+                    v
+                })
+                .collect()
+        };
+        let want = vec![vec!["WritePublicInformation"], vec!["WriteAltSecurityIdentities"]];
+        assert_eq!(rights(NodeKind::User, g::C_USER), want);
+        assert_eq!(rights(NodeKind::Computer, g::C_COMPUTER), want);
+        assert_eq!(rights(NodeKind::Group, g::C_GROUP), vec![Vec::<&str>::new(), vec![]]);
     }
 }

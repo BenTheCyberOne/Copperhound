@@ -199,7 +199,7 @@ pub fn compute(g: &Graph, sources: &[Value]) -> Value {
             let acl = if d.with_acl == 0 { None } else { pct(d.with_acl, d.objects) };
             let mut warnings: Vec<String> = Vec::new();
             if d.computers_enabled > 0 && sess.is_some_and(|p| p < SESSION_MIN * 100.0) {
-                warnings.push(format!("Session data for {}% of enabled computers: user-on-computer paths (HasSession) are mostly missing. Collect sessions (SharpHound -c Session, ideally looped).", sess.unwrap_or(0.0)));
+                warnings.push(format!("Session data for {}% of enabled computers: user-on-computer paths (HasSession) are mostly missing. Collect sessions (SharpHound -c Session,LoggedOn, ideally looped), or upload logon data: scripts/Export-CopperHoundLogons.ps1 (Security event 4624) or a Defender XDR DeviceLogonEvents export.", sess.unwrap_or(0.0)));
             }
             if d.computers_enabled > 0 && lg.is_some_and(|p| p < LOCAL_GROUP_MIN * 100.0) {
                 warnings.push(format!("Local group data for {}% of enabled computers: local admin / RDP rights are mostly missing. Collect LocalGroup (needs admin or remote SAM access).", lg.unwrap_or(0.0)));

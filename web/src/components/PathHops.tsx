@@ -20,7 +20,7 @@ export function hopsOf(result: GraphResult, i = 0): Hop[] {
 }
 
 /** Textual hop list: node → kind → node … */
-export function PathHops({ hops, nodes }: { hops: Hop[]; nodes: Node[] }) {
+export function PathHops({ hops, nodes, costs }: { hops: Hop[]; nodes: Node[]; costs?: number[] }) {
   const { select, store } = useApp();
   if (hops.length === 0) return null;
   const byId = new Map<NodeId, Node>(nodes.map((n) => [n.id, n]));
@@ -41,6 +41,11 @@ export function PathHops({ hops, nodes }: { hops: Hop[]; nodes: Node[] }) {
             {hop && (
               <div className="hop-edge">
                 <EdgeKindToggle kind={hop.kind} suffix=" →" edge={hop.kind === "?" ? undefined : hop} />
+                {costs?.[i] !== undefined && (
+                  <span className="tag hop-cost" title="Cost of this step">
+                    +{costs[i]}
+                  </span>
+                )}
               </div>
             )}
           </li>

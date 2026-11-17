@@ -64,6 +64,9 @@ import type {
   NewCollectorResponse,
   QualityResponse,
   EdgeComposition,
+  EdgeSession,
+  CheapestResponse,
+  CostProfile,
   Environment,
   KindStyle,
   LdapTarget,
@@ -496,6 +499,10 @@ export const api = {
   /** Why a derived edge exists (404 when the edge is not in the graph). */
   edgeComposition: (src: NodeId, dst: NodeId, kind: string) =>
     call<EdgeComposition>("GET", "/edges/composition", { query: { src, dst, kind } }),
+
+  edgeSession: (src: NodeId, dst: NodeId) => call<EdgeSession>("GET", "/edges/session", { query: { src, dst } }),
+
+  cheapestToTier0: (profile: CostProfile, limit = 25) => call<CheapestResponse>("GET", "/tier0/cheapest", { query: { profile, limit } }),
 
   nodeEdges: (id: NodeId, dir: Direction, kind?: string, limit = 500) =>
     call<GraphResult>("GET", `/nodes/${id}/edges`, { query: { dir, kind, limit } }),

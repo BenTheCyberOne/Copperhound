@@ -236,7 +236,7 @@ export function denied(who: Principal, req: ApiRequest, need: Role): ApiResponse
 let settings: ServerSettings = {
   watch: { enabled: false, dir: "", mode: "replace", settle_seconds: 30, archive: true, keep_archives: 5 },
   analysis: { unified_tier0: true },
-  ingest: { merge_policy: "newest", session_window_hours: 0 },
+  ingest: { merge_policy: "newest", session_window_hours: 0, session_max_age_days: 0 },
 };
 
 /** Ingest options the next mock ingest job uses (v1.5). */

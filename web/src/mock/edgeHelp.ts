@@ -311,9 +311,9 @@ export const EDGE_HELP: Record<string, EdgeHelp> = {
     remediation: "Remove the issuance policy's group link or restrict enrollment on the template; never link issuance policies to privileged groups.",
   },
   WritePublicInformation: {
-    description: "The source principal can write the Public-Information property set of the target user or computer, which includes userPrincipalName. Not traversable; an attacker right for ADCSESC9a and ADCSESC10a.",
-    abuse: "Rewrite the victim's UPN as part of ESC9 / ESC10.",
-    remediation: "Remove write access to the Public-Information property set from principals that do not administer the account.",
+    description: "The source principal can write the Public-Information property set of the target user or computer, which includes altSecurityIdentities and userPrincipalName. Traversable since 0.4.0 (ESC14 scenario A); also an attacker right for ADCSESC9a and ADCSESC10a.",
+    abuse: "Add an explicit certificate mapping (X509IssuerSerialNumber, X509SKI or X509SHA1PublicKey) of a certificate the attacker holds to the target's altSecurityIdentities, then authenticate as the target with PKINIT or Schannel (ESC14A). Alternatively rewrite the UPN as part of ESC9 / ESC10.",
+    remediation: "Remove write access to the Public-Information property set from principals that do not administer the account; review altSecurityIdentities values on privileged accounts.",
   },
   AZContains: {
     description: "The source scope (tenant, management group, subscription or resource group) contains the target object. Rights granted on a scope apply to everything below it.",
@@ -619,5 +619,65 @@ export const EDGE_HELP: Record<string, EdgeHelp> = {
     description: "The source can change the logic, configuration or firmware of the target controller (PLC, RTU, safety controller, drive): typically an engineering workstation running the vendor's programming software, or an account with programming rights in it. Not collected from AD; supplied as OpenGraph from an OT asset inventory (docs/OT.md).",
     abuse: "Control of the source (local admin or a logon on the engineering workstation, or the programming account) lets an attacker download modified logic or firmware to the controller, change setpoints or stop the process (MITRE ATT&CK for ICS: Modify Controller Tasking, Program Download).",
     remediation: "Limit which workstations and accounts can program each controller; keep engineering workstations out of IT administration (no IT admin groups as local admins, no IT admin logons), require the controller's key switch or password for downloads, and monitor program changes.",
+  },
+  CoerceAndRelayNTLMToSMB: {
+    description: "Any authenticated user can coerce the target computer to authenticate over NTLM and relay it over SMB to another computer where the target computer's account is a local administrator and SMB signing is not required. The target computer does not restrict outgoing NTLM.",
+    abuse: "Coerce the computer (PetitPotam, PrinterBug, DFSCoerce) and relay the authentication with ntlmrelayx to SMB on the host it administers; this gives local administrator on that host.",
+    remediation: "Require SMB signing on every host (Microsoft network server: Digitally sign communications (always)); remove computer accounts from other hosts' local Administrators; restrict outgoing NTLM.",
+  },
+  CoerceAndRelayNTLMToLDAP: {
+    description: "Any authenticated user can coerce the target computer to authenticate over HTTP (the WebClient service is running, so WebDAV coercion yields NTLM without signing) and relay it to LDAP on a domain controller of its domain that does not require LDAP signing. The computer does not restrict outgoing NTLM.",
+    abuse: "Coerce over WebDAV (for example PetitPotam with a \\\\host@80\\x path) and relay to LDAP to write shadow credentials (msDS-KeyCredentialLink) or resource-based constrained delegation on the computer account, then take it over.",
+    remediation: "Require LDAP signing on every DC (Domain controller: LDAP server signing requirements = Require signing); stop and disable the WebClient service where WebDAV is not needed; restrict outgoing NTLM.",
+  },
+  CoerceAndRelayNTLMToLDAPS: {
+    description: "Any authenticated user can coerce the target computer to authenticate over HTTP (WebClient running) and relay it to LDAPS on a domain controller of its domain that does not enforce channel binding (Extended Protection for Authentication). The computer does not restrict outgoing NTLM.",
+    abuse: "Coerce over WebDAV and relay to LDAPS (signing is not checked over TLS) to write shadow credentials or resource-based constrained delegation on the computer account.",
+    remediation: "Set LDAP server channel binding token requirements to Always on every DC; disable the WebClient service where it is not needed; restrict outgoing NTLM.",
+  },
+  CoerceAndRelayNTLMToADCS: {
+    description: "Any authenticated user can coerce the target computer to authenticate over NTLM and relay it to web enrollment on an enterprise CA that accepts NTLM over HTTP, or over HTTPS without Extended Protection (ESC8). The computer can enroll in an authentication template the CA publishes without manager approval, the CA is trusted for NTAuth in the source's domain, and the computer does not restrict outgoing NTLM.",
+    abuse: "Coerce the computer (PetitPotam, PrinterBug, DFSCoerce), relay to /certsrv/ (ntlmrelayx --adcs), obtain a certificate for the computer account and authenticate as it; for a DC this leads to DCSync.",
+    remediation: "Disable HTTP on web enrollment and CES endpoints, require HTTPS with Extended Protection for Authentication, or remove web enrollment; restrict outgoing NTLM from servers and DCs.",
+  },
+  CoerceAndRelayNTLMToADCSRPC: {
+    description: "Any authenticated user can coerce the target computer to authenticate over NTLM and relay it to the RPC enrollment interface of an enterprise CA that does not enforce request encryption (IF_ENFORCEENCRYPTICERTREQUEST off, ESC11). The computer can enroll in an authentication template the CA publishes without manager approval, and it does not restrict outgoing NTLM.",
+    abuse: "Coerce the computer and relay to the CA's ICertPassage RPC interface (ntlmrelayx -t rpc://<ca> -rpc-mode ICPR), then authenticate with the issued computer certificate.",
+    remediation: "Enable request encryption (certutil -setreg CA\\InterfaceFlags +IF_ENFORCEENCRYPTICERTREQUEST) and restart the CA; restrict outgoing NTLM.",
+  },
+  ADCSESC16: {
+    description: "An enterprise CA trusted for NTAuth allows requester-specified SANs (EDITF_ATTRIBUTESUBJECTALTNAME2) and has the SID security extension (1.3.6.1.4.1.311.25.2) disabled for every certificate it issues. The source principal can enroll (template and CA) in an authentication template published by it without manager approval.",
+    abuse: "Request a certificate with a privileged user's UPN (and, under full enforcement, a SID URL) in the SAN; the CA issues it without the SID security extension, so the certificate authenticates as that user.",
+    remediation: "Remove 1.3.6.1.4.1.311.25.2 from the CA's DisableExtensionList, clear EDITF_ATTRIBUTESUBJECTALTNAME2 (certutil -setreg policy\\EditFlags -EDITF_ATTRIBUTESUBJECTALTNAME2) and restart the CA; enforce strong certificate binding on DCs.",
+  },
+  WriteAltSecurityIdentities: {
+    description: "The source principal can write altSecurityIdentities on the target user or computer (ESC14 scenario A).",
+    abuse: "Add an explicit certificate mapping (X509IssuerSerialNumber, X509SKI or X509SHA1PublicKey) of a certificate the attacker holds, then authenticate as the target with PKINIT or Schannel.",
+    remediation: "Remove write access to altSecurityIdentities from principals that do not administer the account; review altSecurityIdentities values on privileged accounts.",
+  },
+  DCFor: {
+    description: "The source computer is a domain controller of the target domain. Control of a DC is control of the domain.",
+    abuse: "With administrative access to the DC, dump the domain's secrets (ntds.dit, DCSync) or forge tickets with the krbtgt key.",
+    remediation: "Treat every DC as Tier Zero: restrict local and remote logons to Tier Zero administrators.",
+  },
+  DumpSMSAPassword: {
+    description: "The target standalone managed service account (sMSA) is installed on the source computer (msDS-HostServiceAccount). The computer stores the account's password as an LSA secret.",
+    abuse: "With administrative access to the computer, read the sMSA password from the LSA secrets (mimikatz lsadump::secrets) and act as the account.",
+    remediation: "Treat the host as at least as privileged as the account; do not grant sMSAs privileges beyond the service they run; prefer gMSAs with a tightly scoped PrincipalsAllowedToRetrieveManagedPassword.",
+  },
+  ClaimSpecialIdentity: {
+    description: "Membership of the target special identity is decided when a principal authenticates, not by a member list, so any authenticated principal (the source) can obtain it: for example Network (S-1-5-2), This Organization (S-1-5-15), NTLM Authentication (S-1-64-10), Schannel Authentication (S-1-64-14) or Key Trust (S-1-18-4). From Everyone, the edge points to the domain's Guest account when it is enabled.",
+    abuse: "Authenticate in the way that adds the identity to the token (over the network, with NTLM, with a certificate over Schannel, with shadow credentials over PKINIT) and use the rights granted to it; log on as Guest when it is enabled.",
+    remediation: "Do not grant rights to special identities; remove such ACEs and keep the Guest account disabled.",
+  },
+  ProtectAdminGroups: {
+    description: "The source AdminSDHolder container's security descriptor is copied onto the target protected object (adminsdholderprotected) by the ProtectAdminGroups task on the PDC emulator, by default every hour. Not traversable: the change applies only on the next run.",
+    abuse: "Write access to AdminSDHolder (Owns, WriteOwner, WriteDacl) grants rights that spread to every protected account and group within the hour, a common persistence technique.",
+    remediation: "Treat AdminSDHolder as Tier Zero, review its DACL for non-default entries, and monitor changes to it (event 5136).",
+  },
+  SQLAdmin: {
+    description: "The source account runs a Microsoft SQL Server instance on the target computer (an MSSQLSvc service principal name for the host is registered on the account). By default the service account is sysadmin of the instance.",
+    abuse: "Log on to the instance as the service account, read every database, and run operating system commands through SQL Server (xp_cmdshell, agent jobs, CLR) as the service account.",
+    remediation: "Run SQL Server as a gMSA or virtual account, remove the service account's sysadmin membership where possible, and protect the account at the tier of the data it serves.",
   },
 };

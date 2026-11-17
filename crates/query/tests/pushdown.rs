@@ -150,7 +150,7 @@ fn random_graph(seed: u64, n: usize, upper_oids: bool) -> Graph {
         edges.push(Edge::new(a, b, *r.pick(&[ek::MEMBER_OF, ek::MEMBER_OF, ek::ADMIN_TO, ek::HAS_SESSION])));
     }
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-    let (g, _) = Graph::build(GraphParts { kinds, flags: fl, names, oids, props: ps, edge_chunks: vec![edges], edge_kinds, traversable, node_kinds: Vec::new() }).unwrap();
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(), kinds, flags: fl, names, oids, props: ps, edge_chunks: vec![edges], edge_kinds, traversable, node_kinds: Vec::new() }).unwrap();
     g
 }
 

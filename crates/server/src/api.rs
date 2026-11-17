@@ -54,7 +54,7 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
-type ApiResult<T = Json<Value>> = Result<T, ApiError>;
+pub(crate) type ApiResult<T = Json<Value>> = Result<T, ApiError>;
 
 /// Run CPU-heavy work off the async runtime with read access to the graph.
 async fn with_graph<T: Send + 'static>(
@@ -71,7 +71,7 @@ async fn with_graph<T: Send + 'static>(
 }
 
 /// Like [`with_graph`], also passing the graph generation.
-async fn with_graph_gen<T: Send + 'static>(
+pub(crate) async fn with_graph_gen<T: Send + 'static>(
     st: Arc<AppState>,
     f: impl FnOnce(&Graph, u64) -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
@@ -142,7 +142,7 @@ fn check_id(g: &Graph, id: u32) -> Result<(), ApiError> {
     }
 }
 
-fn edge_filter(g: &Graph, all_edges: bool, exclude: &[String]) -> Result<EdgeFilter, ApiError> {
+pub(crate) fn edge_filter(g: &Graph, all_edges: bool, exclude: &[String]) -> Result<EdgeFilter, ApiError> {
     let mut f = if all_edges { EdgeFilter::all(g) } else { EdgeFilter::traversable(g) };
     for k in exclude {
         f.set(g, k, false).map_err(|e| ApiError::bad(e.to_string()))?;
@@ -207,6 +207,9 @@ pub fn required_role(method: &axum::http::Method, path: &str) -> Role {
         return Role::Admin;
     }
     if p == "/network" && method != Method::GET {
+        return Role::Admin;
+    }
+    if p == "/path-costs" && method != Method::GET {
         return Role::Admin;
     }
     if method == Method::DELETE && p.starts_with("/posture/") {
@@ -676,6 +679,10 @@ pub struct PathReq {
     /// Only paths the network conduits allow (docs/OT.md); returns one path.
     #[serde(default)]
     network: bool,
+    /// `effort` / `stealth`: the cheapest path by edge cost instead of the
+    /// fewest hops (`ch_engine::cost`); returns one path.
+    #[serde(default)]
+    cost: Option<String>,
 }
 
 /// Edges drawn at most for `all: true`.
@@ -696,6 +703,29 @@ pub async fn path(State(st): St, Json(r): Json<PathReq>) -> ApiResult {
             let to = r.to.as_ref().ok_or_else(|| ApiError::bad("'to' is required unless to_tier0 is set"))?;
             vec![resolve(g, to)?]
         };
+        if let Some(c) = &r.cost {
+            let profile = ch_engine::cost::Profile::parse(c).ok_or_else(|| ApiError::bad("cost must be effort or stealth"))?;
+            if r.all || r.network {
+                return Err(ApiError::bad("cost cannot be combined with all or network"));
+            }
+            let model = ch_engine::cost::CostModel::new(g, profile, &crate::costs::overrides(&st2));
+            let mut v = match ch_engine::cost::cheapest_path(g, &[src], &targets, &f, &model) {
+                Some(p) => {
+                    let edges: Vec<_> = p.nodes.windows(2).zip(&p.kinds).map(|(w, &k)| (w[0], w[1], k)).collect();
+                    let mut v = graph_result(g, &p.nodes, &edges, std::slice::from_ref(&p.nodes), false, t);
+                    v["hops"] = Value::Array(edges.iter().map(|&e| edge_json(g, e)).collect());
+                    v["cost"] = json!({"profile": profile.as_str(), "total": p.total, "hop_costs": p.costs});
+                    v
+                }
+                None => {
+                    let mut v = graph_result(g, &[], &[], &[], false, t);
+                    v["hops"] = json!([]);
+                    v
+                }
+            };
+            v["generation"] = json!(generation);
+            return Ok(Json(v));
+        }
         if r.network {
             let m = crate::network::model(&st2, g)?;
             let mut v = match ch_engine::net::net_shortest_path(g, &[src], &targets, &f, &m) {
@@ -943,6 +973,31 @@ pub async fn edge_composition(State(st): St, Query(q): Query<CompositionQ>) -> A
 }
 
 #[derive(Deserialize)]
+pub struct SessionQ {
+    src: u32,
+    dst: u32,
+}
+
+/// When and how the `src -HasSession-> dst` session was seen (`sessions.bin`).
+/// 404 when the graph holds no record of it (older graphs, or no such edge).
+pub async fn edge_session(State(st): St, Query(q): Query<SessionQ>) -> ApiResult {
+    with_graph_gen(st, move |g, generation| {
+        let m = g.session(q.src, q.dst).ok_or_else(|| ApiError::not_found("no session record for this edge"))?;
+        let time = |t: i64| if t > 0 { json!(ch_ingest::merge::rfc3339(t)) } else { Value::Null };
+        Ok(Json(json!({
+            "src": m.computer,
+            "dst": m.user,
+            "first_seen": time(m.first_seen),
+            "last_seen": time(m.last_seen),
+            "sources": ch_store::session_source::names(m.sources),
+            "logon_types": (0..16u16).filter(|t| m.logon_types & (1 << t) != 0).collect::<Vec<_>>(),
+            "generation": generation,
+        })))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
 pub struct SubgraphReq {
     ids: Vec<u32>,
 }
@@ -1074,7 +1129,7 @@ pub async fn delete_saved(State(st): St, Path(id): Path<String>) -> ApiResult {
 
 /// Accepted upload extensions: collector JSON / zips, LDIF (ldapsearch,
 /// ldifde, gzip) and AD Explorer snapshots.
-pub const UPLOAD_EXTENSIONS: &[&str] = &[".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat"];
+pub const UPLOAD_EXTENSIONS: &[&str] = &[".json", ".zip", ".ldif", ".ldf", ".ldif.gz", ".dat", ".csv"];
 
 /// Keep only a safe base file name with an accepted extension.
 pub fn sanitize_upload_name(name: &str) -> Option<String> {

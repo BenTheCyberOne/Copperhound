@@ -233,7 +233,7 @@ relationship type / label), a byte `position` into the query text.
 | Parameters `$name` | ❌ inline values |
 | `CALL` procedures, APOC, GDS | ❌ |
 | `CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE` | ❌ read-only (mark owned objects via the API) |
-| Relationship properties (`r.isacl`, `r.trusttype`…) | ⚠️ parse, evaluate to `null` |
+| Relationship properties (`r.isacl`, `r.trusttype`…) | ⚠️ parse, evaluate to `null`; `HasSession` has `r.lastseen`, `r.firstseen` (unix seconds), `r.sessionsources`, `r.logontypes` |
 | Three-valued logic for `NOT null` | ⚠️ two-valued (null is false) |
 | Integer division | ⚠️ floating-point division |
 | Map literals `{a: 1}` outside node patterns | ❌ |

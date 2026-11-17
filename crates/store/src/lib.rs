@@ -107,6 +107,47 @@ impl Edge {
     }
 }
 
+/// When and how a session (`HasSession` computer → user) was observed.
+/// Stored sorted by `(computer, user)` in `sessions.bin`; graphs written
+/// before it existed have none.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+pub struct SessionMeta {
+    pub computer: u32,
+    pub user: u32,
+    /// Earliest observation, unix seconds; 0 when unknown.
+    pub first_seen: i64,
+    /// Latest observation, unix seconds; 0 when unknown.
+    pub last_seen: i64,
+    /// Where it was seen: [`session_source`] bits.
+    pub sources: u16,
+    /// Windows logon types seen (bit `n` = logon type `n`); 0 when unknown.
+    pub logon_types: u16,
+    pub pad: u32,
+}
+
+/// [`SessionMeta::sources`] bits.
+pub mod session_source {
+    /// SharpHound `Sessions` (NetSessionEnum).
+    pub const SESSIONS: u16 = 1;
+    /// SharpHound `PrivilegedSessions` (NetWkstaUserEnum).
+    pub const PRIVILEGED: u16 = 2;
+    /// SharpHound `RegistrySessions`.
+    pub const REGISTRY: u16 = 4;
+    /// Windows logon events (4624), CopperHound logon export.
+    pub const LOGON_EVENTS: u16 = 8;
+    /// Microsoft Defender XDR `DeviceLogonEvents`.
+    pub const DEFENDER: u16 = 16;
+
+    pub fn names(bits: u16) -> Vec<&'static str> {
+        [(SESSIONS, "sessions"), (PRIVILEGED, "privileged-sessions"), (REGISTRY, "registry-sessions"), (LOGON_EVENTS, "logon-events"), (DEFENDER, "defender")]
+            .iter()
+            .filter(|(b, _)| bits & b != 0)
+            .map(|(_, n)| *n)
+            .collect()
+    }
+}
+
 /// Hash index entry, sorted by `(hash, id)`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -167,6 +208,8 @@ pub struct GraphParts {
     pub traversable: Vec<bool>,
     /// Custom node kind names (see [`GraphMeta::node_kinds`]).
     pub node_kinds: Vec<String>,
+    /// Session observations, any order (see [`SessionMeta`]).
+    pub sessions: Vec<SessionMeta>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -197,6 +240,8 @@ pub struct Graph {
     name_sorted: Buf<u32>,
     props_off: Buf<u64>,
     props_blob: Buf<u8>,
+    /// Sorted by `(computer, user)`.
+    sessions: Buf<SessionMeta>,
     /// Directory the graph was opened from (columns are persisted there).
     dir: Option<PathBuf>,
     cols: OnceLock<Columns>,
@@ -247,6 +292,10 @@ impl Graph {
         ensure!((n as u64) < u32::MAX as u64, "too many nodes for u32 ids");
 
         let raw_edges: u64 = parts.edge_chunks.iter().map(|c| c.len() as u64).sum();
+        let mut sessions = parts.sessions;
+        ensure!(sessions.iter().all(|x| (x.computer as usize) < n && (x.user as usize) < n), "session ids out of range");
+        sessions.sort_unstable_by_key(|x| (x.computer, x.user));
+        sessions.dedup_by_key(|x| (x.computer, x.user));
         let t = Instant::now();
         let (out_off, out_dst, out_kind) = build_csr(n, parts.edge_chunks)?;
         let (in_off, in_src, in_kind) = reverse_csr(n, &out_off, &out_dst, &out_kind);
@@ -304,6 +353,7 @@ impl Graph {
             name_sorted: Buf::Owned(name_sorted),
             props_off: Buf::Owned(props_off),
             props_blob: Buf::Owned(props_blob),
+            sessions: Buf::Owned(sessions),
             dir: None,
             cols,
             kind_bms,
@@ -346,7 +396,8 @@ impl Graph {
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         let _ = fs::remove_file(dir.join("meta.json"));
         // Columns are independent files; write them concurrently.
-        let columns: [(&str, &[u8]); 17] = [
+        let columns: [(&str, &[u8]); 18] = [
+            ("sessions.bin", bytemuck::cast_slice(&self.sessions)),
             ("name.sorted", bytemuck::cast_slice(&self.name_sorted)),
             ("props.off", bytemuck::cast_slice(&self.props_off)),
             ("props.blob", bytemuck::cast_slice(&self.props_blob)),
@@ -393,6 +444,14 @@ impl Graph {
         if !(MIN_FORMAT_VERSION..=FORMAT_VERSION).contains(&meta.format_version) {
             bail!("unsupported graph format version {}", meta.format_version);
         }
+        let mut meta = meta;
+        // Traversability of built-in kinds follows the current release, so a
+        // kind made traversable later applies to graphs written before.
+        for (name, t) in meta.edge_kinds.iter().zip(meta.traversable.iter_mut()) {
+            if let Some(k) = ch_model::builtin_edge_kind(name) {
+                *t = ch_model::BUILTIN_EDGE_KINDS[k as usize].1;
+            }
+        }
         let (cols, kind_bms, flag_bms) = empty_caches();
         let g = Graph {
             dir: Some(dir.to_path_buf()),
@@ -416,6 +475,7 @@ impl Graph {
             name_sorted: map(dir, "name.sorted")?,
             props_off: map(dir, "props.off")?,
             props_blob: map(dir, "props.blob")?,
+            sessions: if dir.join("sessions.bin").exists() { map(dir, "sessions.bin")? } else { Buf::Owned(Vec::new()) },
             meta,
         };
         g.validate()?;
@@ -618,6 +678,17 @@ impl Graph {
             .into_par_iter()
             .filter(|&id| self.flags[id as usize] & f != 0)
             .collect()
+    }
+
+    /// Session observations, sorted by `(computer, user)`.
+    pub fn sessions(&self) -> &[SessionMeta] {
+        &self.sessions
+    }
+
+    /// When the `computer -HasSession-> user` session was seen, if recorded.
+    pub fn session(&self, computer: u32, user: u32) -> Option<&SessionMeta> {
+        let s = &self.sessions[..];
+        s.binary_search_by_key(&(computer, user), |x| (x.computer, x.user)).ok().map(|i| &s[i])
     }
 
     /// Raw collector properties of a node as a JSON object string (`""` if none).
@@ -926,7 +997,7 @@ mod tests {
 
     fn parts() -> GraphParts {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        GraphParts {
+        GraphParts { sessions: Vec::new(),
             kinds: vec![1, 2, 3],
             flags: vec![0, 0, 0],
             names: vec![Some("ALICE@X".into()), None, Some("PC1.X".into())],
@@ -948,7 +1019,7 @@ mod tests {
     #[test]
     fn corrupt_graph_files_are_refused() {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        let parts = GraphParts {
+        let parts = GraphParts { sessions: Vec::new(),
             kinds: vec![1, 2, 3],
             flags: vec![0; 3],
             names: vec![Some("A".into()), Some("B".into()), Some("C".into())],
@@ -983,7 +1054,7 @@ mod tests {
     #[test]
     fn empty_graph_round_trip() {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        let parts = GraphParts {
+        let parts = GraphParts { sessions: Vec::new(),
             kinds: vec![],
             flags: vec![],
             names: vec![],

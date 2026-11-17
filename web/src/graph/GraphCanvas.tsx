@@ -4,6 +4,7 @@ import type { Node } from "../api/types";
 import { Derivation } from "../components/Derivation";
 import { EdgeHelpView } from "../components/EdgeHelp";
 import { KindBadge } from "../components/KindBadge";
+import { SessionInfo } from "../components/SessionInfo";
 import { useNodeActions, type NodeAction } from "../components/useNodeActions";
 import { useSettings } from "../settings/SettingsContext";
 import { useApp } from "../state/AppContext";
@@ -63,6 +64,7 @@ function EdgePanel({ edgeKey, onClose }: { edgeKey: string; onClose: () => void 
           <div key={kind} className="edge-panel-kind">
             <EdgeHelpView kind={kind} />
             {isComposite(kind) && <Derivation key={`${src.id}-${dst.id}-${kind}`} src={src.id} dst={dst.id} kind={kind} />}
+            {kind === "HasSession" && <SessionInfo src={src.id} dst={dst.id} />}
             <button
               type="button"
               className="small"

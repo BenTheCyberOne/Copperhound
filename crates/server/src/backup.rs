@@ -35,6 +35,7 @@ const ROOT_FILES: &[&str] = &[
     "sso.json",
     "saml.json",
     "settings.json",
+    "path_costs.json",
     "notify.json",
     "alert_rules.json",
     "schedules.json",

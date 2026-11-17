@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api/client";
-import type { GraphResult } from "../api/types";
+import type { CostProfile, GraphResult } from "../api/types";
 import { CategoryChecklist } from "../components/CategoryChecklist";
 import { NodePicker } from "../components/NodePicker";
 import { hopsOf, PathHops } from "../components/PathHops";
@@ -14,6 +14,7 @@ export function PathTab() {
   const [allEdges, setAllEdges] = useState(false);
   const [allPaths, setAllPaths] = useState(false);
   const [network, setNetwork] = useState(false);
+  const [mode, setMode] = useState<"hops" | CostProfile>("hops");
   const [hasConduits, setHasConduits] = useState(false);
   useEffect(() => {
     api.network().then(
@@ -21,7 +22,7 @@ export function PathTab() {
       () => setHasConduits(false),
     );
   }, []);
-  const useNetwork = network && hasConduits;
+  const useNetwork = network && hasConduits && mode === "hops";
   const [exclude, setExclude] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<GraphResult | null>(null);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
@@ -51,8 +52,9 @@ export function PathTab() {
           to_tier0: toTier0,
           exclude: [...exclude],
           all_edges: allEdges,
-          all: allPaths && !useNetwork,
+          all: allPaths && !useNetwork && mode === "hops",
           ...(useNetwork ? { network: true } : {}),
+          ...(mode !== "hops" ? { cost: mode } : {}),
         }),
       );
       const hops = hopsOf(res);
@@ -65,11 +67,13 @@ export function PathTab() {
       const many = res.all_paths;
       const zones = res.zones?.filter((z): z is string => z !== null) ?? [];
       const route = zones.filter((z, i) => i === 0 || z !== zones[i - 1]);
-      const extra = many
-        ? ` · all shortest paths: ${many.nodes} objects, ${many.edges} relationships${many.truncated ? " (capped)" : ""}`
-        : res.network
-          ? ` · network-feasible${route.length > 0 ? `: ${route.join(" → ")}` : ""}`
-          : "";
+      const extra = res.cost
+        ? ` · ${res.cost.profile} cost ${res.cost.total}`
+        : many
+          ? ` · all shortest paths: ${many.nodes} objects, ${many.edges} relationships${many.truncated ? " (capped)" : ""}`
+          : res.network
+            ? ` · network-feasible${route.length > 0 ? `: ${route.join(" → ")}` : ""}`
+            : "";
       setStatus({ text: `${hops.length} hop${hops.length === 1 ? "" : "s"}${extra} · ${res.elapsed_ms.toFixed(1)} ms`, error: false });
       loadResult(res, { path: true });
     } catch (err) {
@@ -91,11 +95,27 @@ export function PathTab() {
         Any Tier Zero object
       </label>
       {!toTier0 && <NodePicker label="Path end" value={pathTo} onSelect={setPathTo} onClear={() => setPathTo(null)} />}
-      <label className="toggle" title="Draw every path of the shortest length, not just one">
-        <input type="checkbox" checked={allPaths && !useNetwork} disabled={useNetwork} onChange={(e) => setAllPaths(e.target.checked)} />
-        All shortest paths
-      </label>
-      {hasConduits && (
+      <div className="field-label">Optimise for</div>
+      <div className="seg" role="radiogroup" aria-label="Optimise for">
+        {(
+          [
+            ["hops", "Fewest hops", "The shortest path by number of steps"],
+            ["effort", "Least effort", "The path that needs the least work: credential theft, cracking and coercion cost more"],
+            ["stealth", "Stealthiest", "The path least likely to be noticed: DCSync, password resets and group membership changes cost more"],
+          ] as const
+        ).map(([v, label, title]) => (
+          <button key={v} type="button" role="radio" aria-checked={mode === v} className={mode === v ? "on" : ""} title={title} onClick={() => setMode(v)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === "hops" && (
+        <label className="toggle" title="Draw every path of the shortest length, not just one">
+          <input type="checkbox" checked={allPaths && !useNetwork} disabled={useNetwork} onChange={(e) => setAllPaths(e.target.checked)} />
+          All shortest paths
+        </label>
+      )}
+      {hasConduits && mode === "hops" && (
         <label className="toggle" title="Follow only paths the network conduits allow (Admin → Server → Network conduits)">
           <input type="checkbox" checked={network} onChange={(e) => setNetwork(e.target.checked)} />
           Only paths the network allows
@@ -115,7 +135,7 @@ export function PathTab() {
 
       <div className="row gap">
         <button type="submit" className="primary" disabled={!canRun}>
-          {running ? "Searching…" : "Find shortest path"}
+          {running ? "Searching…" : mode === "hops" ? "Find shortest path" : "Find cheapest path"}
         </button>
         <button
           type="button"
@@ -132,7 +152,7 @@ export function PathTab() {
       </div>
 
       {status && <p className={status.error ? "error" : "muted"}>{status.text}</p>}
-      {result && <PathHops hops={hopsOf(result)} nodes={result.nodes} />}
+      {result && <PathHops hops={hopsOf(result)} nodes={result.nodes} costs={result.cost?.hop_costs} />}
     </form>
   );
 }

@@ -208,7 +208,7 @@ mod tests {
             props.push((!p.is_empty()).then(|| p.to_string()));
         }
         let n = kinds.len();
-        let parts = GraphParts {
+        let parts = GraphParts { sessions: Vec::new(),
             kinds,
             flags: vec![0; n],
             names: vec![None; n],

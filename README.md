@@ -148,6 +148,8 @@ copperhound stats corp.chg
 # Shortest attack path (names or SIDs/GUIDs, case-insensitive)
 copperhound path corp.chg --from jdoe@corp.local --to "DOMAIN ADMINS@CORP.LOCAL"
 copperhound path corp.chg --from jdoe@corp.local --to-tier0 --exclude HasSession
+# Cheapest path by attacker effort (or --cost stealth) instead of fewest hops
+copperhound path corp.chg --from jdoe@corp.local --to-tier0 --cost effort
 
 # Tier Zero exposure and the edges whose removal cuts the most attack paths
 copperhound tier0 corp.chg --top 25
@@ -170,7 +172,9 @@ copperhound columns corp.chg        # list property columns (builds them for old
 SharpHound (v4–v6, CE) and bloodhound-python JSON, SharpHound ADCS, AzureHound
 (v2, v3), ldapdomaindump, LDIF (`ldapsearch`, `ldifde`, gzipped), Sysinternals AD
 Explorer snapshots and OpenGraph JSON for custom node and edge kinds, as files,
-directories or `.zip` archives. CopperHound can also collect over LDAP itself.
+directories or `.zip` archives. Sessions can also come from logon data (Security
+event 4624 via `scripts/Export-CopperHoundLogons.ps1`, or Defender XDR
+`DeviceLogonEvents`). CopperHound can also collect over LDAP itself.
 Several collections of the same domain merge object by object, newest wins.
 Formats, raw LDAP collection, derived edges, Tier Zero defaults and merge rules:
 [docs/DATA.md](docs/DATA.md).
@@ -188,7 +192,7 @@ Formats, raw LDAP collection, derived edges, Tier Zero defaults and merge rules:
 | `ch-synth` | synthetic dataset generator |
 | `copperhound` | CLI (`ingest`, `serve`, `query`, `path`, `tier0`, `reach`, `stats`, `synth`) |
 | `web/` | React + TypeScript + sigma.js UI |
-| `scripts/` | `demo_data.py`: fabricated demo environment; `accuracy-diff.sh` |
+| `scripts/` | `demo_data.py`: fabricated demo environment; `accuracy-diff.sh`; `Export-CopperHoundLogons.ps1`: session data from logon events |
 | `tools/` | helper scripts (`ldap-member-ranges.sh` / `.ps1`: complete large-group `member` ranges for LDIF dumps) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details and the roadmap.

@@ -1040,7 +1040,7 @@ mod tests {
                 Edge::new(a, b, k)
             })
             .collect();
-        Graph::build(GraphParts {
+        Graph::build(GraphParts { sessions: Vec::new(),
             kinds,
             flags: fl,
             names: vec![None; n as usize],

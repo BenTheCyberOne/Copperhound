@@ -900,6 +900,30 @@ impl X<'_, '_, '_> {
             p.put("unresolvedpublishedtemplates", unresolved);
         }
 
+        // Network probe results (built-in collector, `probe` on).
+        let probe_bool = |a: A| e.text(a).map(|v| v.eq_ignore_ascii_case("TRUE"));
+        if kind == K::Computer {
+            for (a, key) in [
+                (A::ProbeSmbSigning, "smbsigning"),
+                (A::ProbeLdapSigning, "ldapsigning"),
+                (A::ProbeLdapAvailable, "ldapavailable"),
+                (A::ProbeLdapsAvailable, "ldapsavailable"),
+            ] {
+                if let Some(v) = probe_bool(a) {
+                    p.put(key, v);
+                }
+            }
+            if probe_bool(A::ProbeNtlmAssumed) == Some(true) {
+                p.put("restrictoutboundntlm", false);
+                p.put("restrictoutboundntlmassumed", true);
+            }
+        }
+        if kind == K::EnterpriseCa && probe_bool(A::ProbeWebEnrollment) == Some(true) {
+            let urls: Vec<&str> = e.texts(A::ProbeHttpEnrollment).collect();
+            p.put("hasvulnerableendpoint", !urls.is_empty());
+            p.put("httpenrollmentendpoints", urls);
+        }
+
         let props = p.finish();
         let Some(me) = self.em.own(&oid, Some(kind), Some(&name), fl, props) else { return };
 
@@ -956,6 +980,39 @@ impl X<'_, '_, '_> {
             }
             if complete && !delegate_to.is_empty() {
                 self.em.claim(me, cat::DELEGATE);
+            }
+            // ---- SQLAdmin: the account runs SQL Server on the SPN's host
+            if kind == K::User {
+                self.em.scope(me, cat::SPN_TARGETS, false);
+                let mut complete = true;
+                let mut any = false;
+                for spn in spns.iter().filter(|s| s.split('/').next().is_some_and(|c| c.eq_ignore_ascii_case("MSSQLSvc"))) {
+                    any = true;
+                    let Some(h) = spn_host(spn) else { continue };
+                    let short = h.split('.').next().unwrap_or(h);
+                    match self.ctx.hosts.get(&host_key(h)).or_else(|| self.ctx.hosts.get(&host_key(short))) {
+                        Some(&c) => self.em.edge(me, c, ch_model::ek_of("SQLAdmin")),
+                        None => complete = false,
+                    }
+                }
+                if complete && any {
+                    self.em.claim(me, cat::SPN_TARGETS);
+                }
+            }
+            // ---- sMSAs installed on this computer
+            if kind == K::Computer {
+                let dns: Vec<String> = e.texts(A::HostServiceAccount).map(str::to_string).collect();
+                self.em.scope(me, cat::DUMP_SMSA, false);
+                let mut complete = true;
+                for dn in &dns {
+                    match self.dn_ref(dn) {
+                        Some(x) => self.em.edge(me, x, ch_model::ek_of("DumpSMSAPassword")),
+                        None => complete = false,
+                    }
+                }
+                if complete && !dns.is_empty() {
+                    self.em.claim(me, cat::DUMP_SMSA);
+                }
             }
             let vals: Vec<Vec<u8>> = e.all(A::AllowedToAct).map(<[u8]>::to_vec).collect();
             self.em.scope(me, cat::ALLOWED_TO_ACT, !vals.is_empty() && vals.iter().all(|v| sd::parse(v).is_some()));

@@ -223,7 +223,7 @@ pub const BUILTIN_EDGE_KINDS: &[(&str, bool)] = &[
     ("ADCSESC10a", true),
     ("ADCSESC10b", true),
     ("ADCSESC13", true),
-    ("WritePublicInformation", false),
+    ("WritePublicInformation", true),
     // ---- Azure / Entra ID (see docs/research/azurehound.md) ----
     ("AZContains", true),
     ("AZMemberOf", true),
@@ -292,6 +292,32 @@ pub const BUILTIN_EDGE_KINDS: &[(&str, bool)] = &[
     ("HasTrustKeys", true),
     // ---- operational technology (docs/OT.md); supplied as OpenGraph ----
     ("CanProgram", true),
+    // ---- NTLM relay (docs/EDGES.md, "NTLM relay") ----
+    ("CoerceAndRelayNTLMToSMB", true),
+    ("CoerceAndRelayNTLMToLDAP", true),
+    ("CoerceAndRelayNTLMToLDAPS", true),
+    ("CoerceAndRelayNTLMToADCS", true),
+    ("CoerceAndRelayNTLMToADCSRPC", true),
+    // ---- more ADCS and AD (docs/EDGES.md) ----
+    ("ADCSESC16", true),
+    ("WriteAltSecurityIdentities", true),
+    ("DCFor", true),
+    ("DumpSMSAPassword", true),
+    ("ClaimSpecialIdentity", true),
+    ("ProtectAdminGroups", false),
+    ("SQLAdmin", true),
+];
+
+/// Edge kinds appended after the Azure block that belong to the "ADCS" category.
+pub const ADCS_EXTRA_EDGE_KINDS: &[&str] = &["CoerceAndRelayNTLMToADCS", "CoerceAndRelayNTLMToADCSRPC", "ADCSESC16"];
+
+/// NTLM relay edge kinds (derived by post-processing).
+pub const RELAY_EDGE_KINDS: &[&str] = &[
+    "CoerceAndRelayNTLMToSMB",
+    "CoerceAndRelayNTLMToLDAP",
+    "CoerceAndRelayNTLMToLDAPS",
+    "CoerceAndRelayNTLMToADCS",
+    "CoerceAndRelayNTLMToADCSRPC",
 ];
 
 /// Edge kinds of the "OT" category (operational technology, docs/OT.md).
@@ -316,6 +342,9 @@ pub fn edge_category(name: &str) -> &'static str {
     }
     if OT_EDGE_KINDS.contains(&name) {
         return "OT";
+    }
+    if ADCS_EXTRA_EDGE_KINDS.contains(&name) {
+        return "ADCS";
     }
     if matches!(name, "SameForestTrust" | "CrossForestTrust" | "SpoofSIDHistory" | "AbuseTGTDelegation" | "HasTrustKeys") {
         return "Active Directory";
@@ -487,6 +516,11 @@ mod tests {
         assert_eq!(edge_category("SeamlessSSO"), "Hybrid");
         assert_eq!(edge_category("SyncedToEntraGroup"), "Hybrid");
         assert_eq!(edge_category("CanProgram"), "OT");
+        assert_eq!(edge_category("CoerceAndRelayNTLMToADCS"), "ADCS");
+        assert_eq!(edge_category("ADCSESC16"), "ADCS");
+        assert_eq!(edge_category("CoerceAndRelayNTLMToLDAP"), "Active Directory");
+        assert_eq!(edge_category("WriteAltSecurityIdentities"), "Active Directory");
+        assert_eq!(edge_category("DCFor"), "Active Directory");
         assert_eq!(node_category(NodeKind::AzVm), "Azure");
         assert_eq!(node_category(NodeKind::RootCa), "ADCS");
     }

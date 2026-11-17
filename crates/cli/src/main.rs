@@ -59,6 +59,10 @@ enum Cmd {
         /// computer's newest session data.
         #[arg(long, default_value_t = 0)]
         session_window_hours: u64,
+        /// Drop sessions last seen more than this many days before the newest
+        /// time in the input (0 = no limit).
+        #[arg(long, default_value_t = 0)]
+        session_max_age_days: u64,
     },
     /// Run a CHQL query, printing JSON.
     Query {
@@ -156,6 +160,13 @@ enum Cmd {
         /// Network conduits (JSON, docs/OT.md): only paths the firewall rules allow.
         #[arg(long)]
         conduits: Option<PathBuf>,
+        /// Cheapest path instead of fewest hops: `effort` or `stealth`
+        /// (docs/USER_GUIDE.md, "Path costs").
+        #[arg(long, value_parser = ["effort", "stealth"], conflicts_with = "conduits")]
+        cost: Option<String>,
+        /// Per-kind cost overrides (JSON `{"effort": {"AdminTo": 2}, "stealth": {...}}`).
+        #[arg(long, requires = "cost")]
+        costs: Option<PathBuf>,
         #[command(flatten)]
         filter: FilterArgs,
     },
@@ -254,12 +265,14 @@ fn main() -> Result<()> {
             no_props,
             merge,
             session_window_hours,
+            session_max_age_days,
         } => {
             let opts = ch_ingest::IngestOptions {
                 temp_dir: temp,
                 keep_props: !no_props,
                 merge_policy: if merge == "union" { ch_ingest::MergePolicy::Union } else { ch_ingest::MergePolicy::Newest },
                 session_window_secs: session_window_hours.saturating_mul(3600),
+                session_max_age_secs: session_max_age_days.saturating_mul(86_400),
                 ..Default::default()
             };
             ingest(&inputs, &out, &opts)
@@ -475,8 +488,10 @@ fn main() -> Result<()> {
             to,
             to_tier0,
             conduits,
+            cost,
+            costs,
             filter,
-        } => path(&graph, &from, to.as_deref(), to_tier0, conduits.as_deref(), &filter),
+        } => path(&graph, &from, to.as_deref(), to_tier0, conduits.as_deref(), cost.as_deref(), costs.as_deref(), &filter),
         Cmd::Tier0 {
             graph,
             top,
@@ -889,7 +904,8 @@ fn net_model(g: &Graph, file: &Path) -> Result<ch_engine::net::NetModel> {
     Ok(m)
 }
 
-fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, conduits: Option<&Path>, fa: &FilterArgs) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, conduits: Option<&Path>, cost: Option<&str>, costs: Option<&Path>, fa: &FilterArgs) -> Result<()> {
     let g = open(graph)?;
     let f = filter(&g, fa)?;
     let src = resolve(&g, from)?;
@@ -902,6 +918,27 @@ fn path(graph: &Path, from: &str, to: Option<&str>, to_tier0: bool, conduits: Op
     } else {
         vec![resolve(&g, to.expect("clap enforces --to or --to-tier0"))?]
     };
+    if let Some(profile) = cost.and_then(ch_engine::cost::Profile::parse) {
+        let overrides: ch_engine::cost::CostOverrides = match costs {
+            Some(p) => serde_json::from_slice(&std::fs::read(p)?).with_context(|| format!("reading {}", p.display()))?,
+            None => Default::default(),
+        };
+        let model = ch_engine::cost::CostModel::new(&g, profile, &overrides);
+        let t = Instant::now();
+        let res = ch_engine::cost::cheapest_path(&g, &[src], &targets, &f, &model);
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        match res {
+            None => println!("no path ({ms:.2} ms)"),
+            Some(p) => {
+                println!("{} cost {}, {} hops, explored {} nodes in {ms:.2} ms", profile.as_str(), p.total, p.kinds.len(), num(p.explored as u64));
+                println!("  {}", label(&g, p.nodes[0]));
+                for (i, k) in p.kinds.iter().enumerate() {
+                    println!("    -[{} +{}]-> {}", g.edge_kind_name(*k), p.costs[i], label(&g, p.nodes[i + 1]));
+                }
+            }
+        }
+        return Ok(());
+    }
     let net = conduits.map(|c| net_model(&g, c)).transpose()?;
     let t = Instant::now();
     let res = match &net {

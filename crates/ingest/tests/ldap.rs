@@ -222,3 +222,65 @@ fn ldif_inside_zip() {
     drop(zb);
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Raw LDAP: an sMSA installed on a computer (`msDS-HostServiceAccount`) and
+/// a SQL Server service account (`MSSQLSvc` SPN) give DumpSMSAPassword and
+/// SQLAdmin, matching SharpHound's `DumpSMSAPassword` / `SPNTargets`.
+#[test]
+fn ldif_smsa_and_sql_admin() {
+    let ldif = "version: 1
+
+dn: DC=corp5,DC=local
+objectClass: top
+objectClass: domain
+objectClass: domainDNS
+distinguishedName: DC=corp5,DC=local
+objectSid:: AQQAAAAAAAUVAAAABQAAAAUAAAAFAAAA
+name: corp5
+
+dn: CN=SRV01,DC=corp5,DC=local
+objectClass: top
+objectClass: computer
+distinguishedName: CN=SRV01,DC=corp5,DC=local
+objectSid:: AQUAAAAAAAUVAAAABQAAAAUAAAAFAAAAUQQAAA==
+sAMAccountName: SRV01$
+dNSHostName: srv01.corp5.local
+userAccountControl: 4096
+msDS-HostServiceAccount: CN=SMSA,DC=corp5,DC=local
+copperhound-smbSigning: FALSE
+copperhound-ntlmAssumedAllowed: TRUE
+
+dn: CN=SMSA,DC=corp5,DC=local
+objectClass: top
+objectClass: msDS-ManagedServiceAccount
+distinguishedName: CN=SMSA,DC=corp5,DC=local
+objectSid:: AQUAAAAAAAUVAAAABQAAAAUAAAAFAAAAFAUAAA==
+sAMAccountName: SMSA$
+userAccountControl: 4096
+
+dn: CN=svc_sql,DC=corp5,DC=local
+objectClass: top
+objectClass: person
+objectClass: user
+distinguishedName: CN=svc_sql,DC=corp5,DC=local
+objectSid:: AQUAAAAAAAUVAAAABQAAAAUAAAAFAAAAFQUAAA==
+sAMAccountName: svc_sql
+userAccountControl: 512
+servicePrincipalName: MSSQLSvc/srv01.corp5.local:1433
+servicePrincipalName: HTTP/web.corp5.local
+";
+    let d = tmp("ldif-smsa");
+    std::fs::write(d.join("corp5.ldif"), ldif).unwrap();
+    let b = build(&d);
+    let g = &b.graph;
+    let srv = "S-1-5-21-5-5-5-1105";
+    assert_eq!(edges_between(g, srv, "S-1-5-21-5-5-5-1300"), vec!["DumpSMSAPassword"]);
+    assert_eq!(edges_between(g, "S-1-5-21-5-5-5-1301", srv), vec!["SQLAdmin"]);
+    // Collector probe results become properties.
+    let p: serde_json::Value = serde_json::from_str(g.props(g.lookup(srv).unwrap())).unwrap();
+    assert_eq!(p["smbsigning"], false);
+    assert_eq!(p["restrictoutboundntlm"], false);
+    assert_eq!(p["restrictoutboundntlmassumed"], true);
+    assert!(p.get("ldapsigning").is_none());
+    let _ = std::fs::remove_dir_all(&d);
+}

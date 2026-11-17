@@ -30,6 +30,8 @@ pub enum InputKind {
     Gzip,
     /// Sysinternals AD Explorer snapshot.
     AdExplorer,
+    /// CSV export of Microsoft Defender XDR `DeviceLogonEvents`.
+    Csv,
 }
 
 /// Detect the input kind of `path` (reads at most 4 KB). `None` for files
@@ -55,6 +57,9 @@ pub fn detect(path: &std::path::Path) -> Option<InputKind> {
     }
     if crate::ldap::ldif::looks_like(&head) {
         return Some(InputKind::Ldif);
+    }
+    if lower.ends_with(".csv") && crate::logons::looks_like_defender_csv(&head) {
+        return Some(InputKind::Csv);
     }
     None
 }

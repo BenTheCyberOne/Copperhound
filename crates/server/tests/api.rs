@@ -1296,3 +1296,113 @@ async fn network_conduits() {
     assert!(v["conduits"].is_null());
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logon_sessions_api() {
+    let data = std::env::temp_dir().join(format!("ch-server-logons-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let up = data.join("uploads");
+    std::fs::create_dir_all(&up).unwrap();
+    std::env::set_var("COPPERHOUND_ADMIN_PASSWORD", "test-password");
+    let d = "S-1-5-21-6-6-6";
+    let wrap = |ty: &str, data: Value| json!({"data": data, "meta": {"type": ty, "count": 1, "version": 6}}).to_string();
+    std::fs::write(up.join("20261101000000_users.json"), wrap("users", json!([{"ObjectIdentifier": format!("{d}-1101"), "Properties": {"name": "ALICE@CORP.LOCAL", "enabled": true}}]))).unwrap();
+    std::fs::write(up.join("20261101000000_computers.json"), wrap("computers", json!([{"ObjectIdentifier": format!("{d}-1201"), "Properties": {"name": "WS01.CORP.LOCAL", "enabled": true}}]))).unwrap();
+    // A Defender XDR export uploaded as CSV.
+    std::fs::write(
+        up.join("DeviceLogonEvents.csv"),
+        format!("Timestamp,DeviceName,ActionType,LogonType,AccountSid\n2026-11-10T08:15:30Z,ws01.corp.local,LogonSuccess,RemoteInteractive,{d}-1101\n"),
+    )
+    .unwrap();
+    let (st, _) = AppState::new(data.clone(), None).unwrap();
+    let app = ch_server::router(st);
+    let (_, v) = call(&app, json_req("POST", "/api/v1/login", None, json!({"username":"admin","password":"test-password"}))).await;
+    let t = v["token"].as_str().unwrap().to_string();
+    let t = t.as_str();
+    ingest_and_wait(&app, t).await;
+
+    let (s, v) = call(&app, json_req("POST", "/api/v1/query", Some(t), json!({"query": "MATCH (c)-[r:HasSession]->(u) RETURN c.objectid, u.objectid, r.lastseen"}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let row = &v["rows"][0];
+    assert_eq!(row[2], 1_794_298_530, "{v}");
+    let ws = call(&app, get("/api/v1/search?q=WS01.CORP.LOCAL", t)).await.1[0]["id"].as_u64().unwrap();
+    let alice = call(&app, get("/api/v1/search?q=ALICE@CORP.LOCAL", t)).await.1[0]["id"].as_u64().unwrap();
+    let (s, v) = call(&app, get(&format!("/api/v1/edges/session?src={ws}&dst={alice}"), t)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["last_seen"], "2026-11-10T08:15:30Z");
+    assert_eq!(v["sources"], json!(["defender"]));
+    assert_eq!(v["logon_types"], json!([10]));
+    let (s, _) = call(&app, get(&format!("/api/v1/edges/session?src={alice}&dst={ws}"), t)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn path_costs_api() {
+    let data = std::env::temp_dir().join(format!("ch-server-costs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let up = data.join("uploads");
+    std::fs::create_dir_all(&up).unwrap();
+    std::env::set_var("COPPERHOUND_ADMIN_PASSWORD", "test-password");
+    let d = "S-1-5-21-5-5-5";
+    let wrap = |ty: &str, data: Value| json!({"data": data, "meta": {"type": ty, "count": 1, "version": 6}}).to_string();
+    // alice → DA two ways, two hops each: ForceChangePassword on an admin
+    // (loud), or GenericAll on a group that is a member of DA (quiet).
+    let user = |rid: u32, name: &str| json!({"ObjectIdentifier": format!("{d}-{rid}"), "Properties": {"name": name, "enabled": true}, "Aces": []});
+    let ace = |rid: u32, right: &str| json!({"PrincipalSID": format!("{d}-{rid}"), "PrincipalType": "User", "RightName": right, "IsInherited": false});
+    let mut admin = user(1102, "ADMIN@CORP.LOCAL");
+    admin["Aces"] = json!([ace(1101, "ForceChangePassword")]);
+    std::fs::write(up.join("users.json"), wrap("users", json!([user(1101, "ALICE@CORP.LOCAL"), admin]))).unwrap();
+    std::fs::write(
+        up.join("groups.json"),
+        wrap(
+            "groups",
+            json!([
+                {"ObjectIdentifier": format!("{d}-512"), "Properties": {"name": "DOMAIN ADMINS@CORP.LOCAL"},
+                 "Members": [{"ObjectIdentifier": format!("{d}-1102"), "ObjectType": "User"}, {"ObjectIdentifier": format!("{d}-1300"), "ObjectType": "Group"}], "Aces": []},
+                {"ObjectIdentifier": format!("{d}-1300"), "Properties": {"name": "OPS@CORP.LOCAL"}, "Members": [], "Aces": [ace(1101, "GenericAll")]}
+            ]),
+        ),
+    )
+    .unwrap();
+    let (st, _) = AppState::new(data.clone(), None).unwrap();
+    let app = ch_server::router(st);
+    let (_, v) = call(&app, json_req("POST", "/api/v1/login", None, json!({"username":"admin","password":"test-password"}))).await;
+    let t = v["token"].as_str().unwrap().to_string();
+    let t = t.as_str();
+    ingest_and_wait(&app, t).await;
+
+    let kinds = |v: &Value| v["hops"].as_array().unwrap().iter().map(|h| h["kind"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let body = |cost: Option<&str>| json!({"from": "ALICE@CORP.LOCAL", "to_tier0": true, "cost": cost});
+    let (s, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(None))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(kinds(&v).len(), 2, "both routes are two hops");
+    let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("stealth")))).await;
+    assert_eq!(kinds(&v), ["GenericAll", "MemberOf"], "a password reset is loud");
+    assert_eq!(v["cost"], json!({"profile": "stealth", "total": 2, "hop_costs": [2, 0]}));
+    let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("effort")))).await;
+    assert_eq!(v["cost"]["total"], 1);
+    let (s, _) = call(&app, json_req("POST", "/api/v1/path", Some(t), json!({"from": "ALICE@CORP.LOCAL", "to_tier0": true, "cost": "speed"}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Overrides: make GenericAll expensive for stealth.
+    let (s, v) = call(&app, json_req("PUT", "/api/v1/path-costs", Some(t), json!({"stealth": {"GenericAll": 20}}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, v) = call(&app, json_req("POST", "/api/v1/path", Some(t), body(Some("stealth")))).await;
+    assert_eq!(kinds(&v), ["ForceChangePassword", "MemberOf"]);
+    let (s, _) = call(&app, json_req("PUT", "/api/v1/path-costs", Some(t), json!({"stealth": {"GenericAll": 5000}}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (_, v) = call(&app, get("/api/v1/path-costs", t)).await;
+    assert_eq!(v["overrides"]["stealth"]["GenericAll"], 20);
+    assert_eq!(v["defaults"]["stealth"]["ForceChangePassword"], 6);
+
+    // Cheapest principals to Tier Zero (effort): the DA member at 0, alice at 1.
+    let (s, v) = call(&app, get("/api/v1/tier0/cheapest?profile=effort&limit=5", t)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let items: Vec<(String, u64)> =
+        v["items"].as_array().unwrap().iter().map(|i| (i["node"]["name"].as_str().unwrap().to_string(), i["cost"].as_u64().unwrap())).collect();
+    assert_eq!(items, [("ADMIN@CORP.LOCAL".to_string(), 0), ("ALICE@CORP.LOCAL".to_string(), 1)]);
+    assert_eq!(v["reachable"], 2);
+    assert_eq!(v["by_cost"], json!([{"cost": 0, "count": 1}, {"cost": 1, "count": 1}]));
+    let _ = std::fs::remove_dir_all(&data);
+}

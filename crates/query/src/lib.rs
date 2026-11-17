@@ -234,7 +234,7 @@ mod tests {
     fn graph() -> Graph {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
         let names = ["ALICE@CORP", "HELPDESK@CORP", "WS1.CORP", "BOB@CORP", "DOMAIN ADMINS@CORP", "CAROL@CORP"];
-        let (g, _) = Graph::build(GraphParts {
+        let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![1, 2, 3, 1, 2, 1],
             flags: vec![flags::ENABLED, 0, flags::ENABLED, flags::ADMINCOUNT, flags::TIER0, 0],
             names: names.iter().map(|n| Some(n.to_string())).collect(),
@@ -261,6 +261,46 @@ mod tests {
         })
         .unwrap();
         g
+    }
+
+    #[test]
+    fn session_properties() {
+        use ch_store::{session_source as ss, SessionMeta};
+        let mut g0 = graph();
+        // Rebuild with metadata for ws1 -HasSession-> bob.
+        let n = g0.node_count() as u32;
+        let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
+        let edges: Vec<Edge> = (0..n)
+            .flat_map(|u| {
+                let (d, k) = g0.out_edges(u);
+                d.iter().zip(k).map(move |(&v, &k)| Edge::new(u, v, k)).collect::<Vec<_>>()
+            })
+            .collect();
+        let (g, _) = Graph::build(GraphParts {
+            sessions: vec![SessionMeta { computer: 2, user: 3, first_seen: 100, last_seen: 200, sources: ss::DEFENDER | ss::SESSIONS, logon_types: 1 << 10, pad: 0 }],
+            kinds: (0..n).map(|i| g0.kind_raw(i)).collect(),
+            flags: (0..n).map(|i| g0.flags(i)).collect(),
+            names: (0..n).map(|i| Some(g0.name(i).to_string())).collect(),
+            oids: (0..n).map(|i| g0.oid(i).to_string()).collect(),
+            props: (0..n).map(|_| None).collect(),
+            edge_chunks: vec![edges],
+            edge_kinds,
+            traversable,
+            node_kinds: Vec::new(),
+        })
+        .unwrap();
+        g0 = g;
+        let q = "MATCH (c)-[r:HasSession]->(u) RETURN r.lastseen, r.firstseen, r.sessionsources, r.logontypes";
+        let r = run(&g0, q, 10).unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(serde_json::to_value(&r.rows[0]).unwrap(), serde_json::json!([200, 100, ["sessions", "defender"], [10]]));
+        let r = run(&g0, "MATCH (c)-[r:HasSession]->(u) WHERE r.lastseen > 150 RETURN u", 10).unwrap();
+        assert_eq!(names(&g0, &r.nodes), ["BOB@CORP"]);
+        // Other kinds and graphs without metadata: null.
+        let r = run(&graph(), "MATCH (c)-[r:HasSession]->(u) RETURN r.lastseen", 10).unwrap();
+        assert_eq!(serde_json::to_value(&r.rows[0]).unwrap(), serde_json::json!([null]));
+        let r = run(&g0, "MATCH (a)-[r:MemberOf]->(b) WHERE r.lastseen IS NOT NULL RETURN r", 10).unwrap();
+        assert!(r.edges.is_empty());
     }
 
     fn names(g: &Graph, ids: &[u32]) -> Vec<String> {

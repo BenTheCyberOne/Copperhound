@@ -23,7 +23,8 @@
 //! or sources that describe disjoint objects, both policies produce the same
 //! graph.
 
-use crate::emit::{DynNodeKinds, Emitted, EndRef, NameEdge, Shared};
+use crate::emit::{DynNodeKinds, Emitted, EndRef, NameEdge, ObsRef, Shared};
+use ch_store::SessionMeta;
 use crate::{IngestOptions, IngestReport, MergePolicy};
 use ahash::{AHashMap, AHashSet};
 use ch_model::{ek, ek_of, flags, is_default_tier0, NodeKind, DOMAIN_CONTROLLERS_SUFFIX};
@@ -76,6 +77,10 @@ pub mod cat {
     pub const GMSA: u8 = 22;
     /// ldapdomaindump `memberOf` (object → group).
     pub const MEMBER_OF: u8 = 23;
+    /// Computer `DumpSMSAPassword` / `msDS-HostServiceAccount`.
+    pub const DUMP_SMSA: u8 = 24;
+    /// User `SPNTargets` (SQLAdmin).
+    pub const SPN_TARGETS: u8 = 25;
     // ---- Azure
     /// Edges carried by an object record (tenant containment, resource
     /// group, managed identities, app → service principal).
@@ -379,6 +384,32 @@ pub(crate) fn merge(
     }
     drop(dn_map);
     let name_edges: Vec<NameEdge> = outputs.iter_mut().flat_map(|o| std::mem::take(&mut o.name_edges)).collect();
+    // Session observations: object ids resolve now (only ids some record
+    // defines or references); computer names resolve after the node merge.
+    let resolve_oid = |r: &ObsRef| -> Option<ObsRef> {
+        match r {
+            ObsRef::Oid(o) => shared.interner.get(o).map(ObsRef::Id),
+            other => Some(other.clone()),
+        }
+    };
+    let mut logon_unmatched = 0u64;
+    for o in &mut outputs {
+        let obs = std::mem::take(&mut o.sessions);
+        o.sessions = obs
+            .into_iter()
+            .filter_map(|mut s| match (resolve_oid(&s.computer), resolve_oid(&s.user)) {
+                (Some(c), Some(u)) => {
+                    s.computer = c;
+                    s.user = u;
+                    Some(s)
+                }
+                _ => {
+                    logon_unmatched += s.add_edge as u64;
+                    None
+                }
+            })
+            .collect();
+    }
 
     let n = shared.interner.len();
     let oids = shared.interner.into_oids();
@@ -436,6 +467,31 @@ pub(crate) fn merge(
             .collect();
         for (s, d) in dropped {
             sources[s as usize].superseded_edges += d;
+        }
+    }
+
+    // --- session observations: collector ones whose edge survived the
+    // newest-collection filter, with the source's collection time; logon
+    // ones as they are (their edges are added below).
+    let mut pending_obs: Vec<crate::emit::SessionObs> = Vec::new();
+    for o in &mut outputs {
+        if o.sessions.is_empty() {
+            continue;
+        }
+        let t = sources[o.source as usize].collected_at_unix.unwrap_or(0);
+        let alive: AHashSet<(u32, u32)> = o.edges.iter().filter(|e| e.kind == ek::HAS_SESSION).map(|e| (e.src, e.dst)).collect();
+        for mut s in std::mem::take(&mut o.sessions) {
+            if !s.add_edge {
+                let (ObsRef::Id(c), ObsRef::Id(u)) = (&s.computer, &s.user) else { continue };
+                if !alive.contains(&(*c, *u)) {
+                    continue;
+                }
+            }
+            if s.last == 0 {
+                s.first = t;
+                s.last = t;
+            }
+            pending_obs.push(s);
         }
     }
 
@@ -606,6 +662,17 @@ pub(crate) fn merge(
         report.name_edges_unresolved = bad;
         chunks.push(edges);
     }
+    let mut sessions: Vec<SessionMeta> = Vec::new();
+    if !pending_obs.is_empty() {
+        let (s, matched, unmatched) = resolve_sessions(pending_obs, &names, &kinds, &mut chunks);
+        sessions = s;
+        report.logon_sessions_matched = matched;
+        logon_unmatched += unmatched;
+    }
+    report.logon_sessions_unmatched = logon_unmatched;
+    if !sessions.is_empty() {
+        report.sessions_aged_out = age_out_sessions(&mut sessions, &mut chunks, &times, opts.session_max_age_secs as i64);
+    }
     // Key-level property merges and provenance of nodes described by several
     // sources, in parallel (one parse / serialise per node).
     if !layers.is_empty() || (shared.keep_props && !multi.is_empty()) {
@@ -673,11 +740,103 @@ pub(crate) fn merge(
     }
     report.tier0_nodes = fl.iter().filter(|f| **f & flags::TIER0 != 0).count() as u64;
 
-    let mut parts = GraphParts { kinds, flags: fl, names, oids, props, edge_chunks: chunks, edge_kinds, traversable, node_kinds };
+    let mut parts = GraphParts { kinds, flags: fl, names, oids, props, edge_chunks: chunks, edge_kinds, traversable, node_kinds, sessions };
     let t = std::time::Instant::now();
     canonical_numbering(&mut parts, &kind_remap);
     report.renumber_secs = t.elapsed().as_secs_f64();
     parts
+}
+
+/// Resolve session observations against the merged nodes: the computer (by
+/// id or unique computer name) must be a Computer and the user a User. Logon
+/// observations add their `HasSession` edge (unowned) as a new chunk.
+/// Returns `(sessions, logon observations matched, logon observations unmatched)`.
+fn resolve_sessions(obs: Vec<crate::emit::SessionObs>, names: &[Option<String>], kinds: &[u8], chunks: &mut Vec<Vec<Edge>>) -> (Vec<SessionMeta>, u64, u64) {
+    let computer = NodeKind::Computer as u8;
+    let wanted: AHashSet<&str> = obs.iter().filter_map(|s| if let ObsRef::Name(n) = &s.computer { Some(&**n) } else { None }).collect();
+    // Exact (upper-case) name, and a host name without a domain against the
+    // first label of computer DNS names.
+    let mut by_name: AHashMap<&str, Vec<u32>> = AHashMap::new();
+    let mut by_short: AHashMap<&str, Vec<u32>> = AHashMap::new();
+    if !wanted.is_empty() {
+        for (i, nm) in names.iter().enumerate() {
+            let Some(nm) = nm.as_deref().filter(|_| kinds[i] == computer) else { continue };
+            if wanted.contains(nm) {
+                by_name.entry(nm).or_default().push(i as u32);
+            }
+            if let Some((short, _)) = nm.split_once('.') {
+                if wanted.contains(short) {
+                    by_short.entry(short).or_default().push(i as u32);
+                }
+            }
+        }
+    }
+    let mut meta: AHashMap<(u32, u32), SessionMeta> = AHashMap::new();
+    let mut edges = Vec::new();
+    let (mut matched, mut unmatched) = (0u64, 0u64);
+    for s in obs {
+        let c = match &s.computer {
+            ObsRef::Id(c) => Some(*c),
+            ObsRef::Name(n) => match by_name.get(&**n) {
+                Some(v) => (v.len() == 1).then(|| v[0]),
+                None if !n.contains('.') => by_short.get(&**n).filter(|v| v.len() == 1).map(|v| v[0]),
+                None => None,
+            },
+            ObsRef::Oid(_) => None,
+        };
+        let u = if let ObsRef::Id(u) = s.user { Some(u) } else { None };
+        let (Some(c), Some(u)) = (c, u) else {
+            unmatched += s.add_edge as u64;
+            continue;
+        };
+        if kinds[c as usize] != computer || kinds[u as usize] != NodeKind::User as u8 || c == u {
+            unmatched += s.add_edge as u64;
+            continue;
+        }
+        if s.add_edge {
+            matched += 1;
+            edges.push(Edge::new(c, u, ek::HAS_SESSION));
+        }
+        let m = meta.entry((c, u)).or_insert(SessionMeta { computer: c, user: u, first_seen: 0, last_seen: 0, sources: 0, logon_types: 0, pad: 0 });
+        if s.first > 0 && (m.first_seen == 0 || s.first < m.first_seen) {
+            m.first_seen = s.first;
+        }
+        m.last_seen = m.last_seen.max(s.last);
+        m.sources |= s.sources;
+        m.logon_types |= s.logon_types;
+    }
+    edges.sort_unstable_by_key(|e| (e.src, e.dst));
+    edges.dedup_by_key(|e| (e.src, e.dst));
+    chunks.push(edges);
+    let mut v: Vec<SessionMeta> = meta.into_values().collect();
+    v.sort_unstable_by_key(|m| (m.computer, m.user));
+    (v, matched, unmatched)
+}
+
+/// Drop sessions last seen more than `max_age` seconds before the newest
+/// known time (collection times and session times), edges and metadata
+/// alike, then keep metadata only for pairs that still have a `HasSession`
+/// edge. Returns the number of sessions dropped. `max_age` 0: no age limit.
+fn age_out_sessions(sessions: &mut Vec<SessionMeta>, chunks: &mut [Vec<Edge>], times: &[i64], max_age: i64) -> u64 {
+    let mut dropped = 0;
+    if max_age > 0 {
+        let newest = times.iter().copied().chain(sessions.iter().map(|s| s.last_seen)).max().unwrap_or(0);
+        let cutoff = newest - max_age;
+        let stale: AHashSet<(u32, u32)> =
+            sessions.iter().filter(|s| s.last_seen > 0 && s.last_seen < cutoff).map(|s| (s.computer, s.user)).collect();
+        if !stale.is_empty() {
+            dropped = stale.len() as u64;
+            chunks.par_iter_mut().for_each(|c| c.retain(|e| e.kind != ek::HAS_SESSION || !stale.contains(&(e.src, e.dst))));
+        }
+    }
+    let present: AHashSet<(u32, u32)> = chunks
+        .par_iter()
+        .flat_map_iter(|c| c.iter().filter(|e| e.kind == ek::HAS_SESSION).map(|e| (e.src, e.dst)))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .collect();
+    sessions.retain(|s| present.contains(&(s.computer, s.user)));
+    dropped
 }
 
 /// Resolve OpenGraph edges addressed by name against the merged node names
@@ -802,6 +961,12 @@ pub fn canonical_numbering(parts: &mut GraphParts, kind_remap: &[u16]) {
         parts.props = permute(std::mem::take(&mut parts.props), &order);
     }
     drop(order);
+    if nodes_moved {
+        for s in parts.sessions.iter_mut() {
+            s.computer = new_id[s.computer as usize];
+            s.user = new_id[s.user as usize];
+        }
+    }
     let new_id = &new_id;
     parts.edge_chunks.par_iter_mut().for_each(|c| {
         c.par_iter_mut().with_min_len(1 << 14).for_each(|e| {

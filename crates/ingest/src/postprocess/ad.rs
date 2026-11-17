@@ -100,7 +100,126 @@ pub fn pass(g: &Graph) -> Vec<Edge> {
     for (a, acct) in trust_accounts(g) {
         out.insert((a, acct, ek_of("HasTrustKeys")));
     }
+    for (dc, d) in dc_for(g) {
+        out.insert((dc, d, ek_of("DCFor")));
+    }
+    for (s, d) in special_identities(g) {
+        out.insert((s, d, ek_of("ClaimSpecialIdentity")));
+    }
+    for (s, d) in protected_by_adminsdholder(g) {
+        out.insert((s, d, ek_of("ProtectAdminGroups")));
+    }
     out.into_iter().map(|(s, d, k)| Edge::new(s, d, k)).collect()
+}
+
+/// `DCFor`: each domain controller (`isdc`, or a member of its domain's
+/// Domain Controllers group) → its domain.
+pub(crate) fn dc_for(g: &Graph) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for d in (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Domain) {
+        let Some(grp) = g.lookup(&format!("{}-516", g.oid(d))) else { continue };
+        let (ss, ks) = g.in_edges(grp);
+        for (&c, &k) in ss.iter().zip(ks) {
+            if k == ch_model::ek::MEMBER_OF && g.kind(c) == NodeKind::Computer {
+                out.push((c, d));
+            }
+        }
+    }
+    for c in (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Computer) {
+        if super::raw_bool(g.props(c), "isdc") == Some(true) {
+            if let Some(d) = domain_of(g, c) {
+                out.push((c, d));
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Special identities any authenticated principal obtains at logon
+/// (BloodHound CE `ClaimSpecialIdentity`).
+pub const SPECIAL_IDENTITIES: &[&str] = &[
+    "S-1-5-2",    // Network
+    "S-1-5-15",   // This Organization
+    "S-1-5-65-1", // This Organization Certificate
+    "S-1-18-1",   // Authentication Authority Asserted Identity
+    "S-1-18-4",   // Key Trust
+    "S-1-18-5",   // MFA Key Property
+    "S-1-64-10",  // NTLM Authentication
+    "S-1-64-14",  // Schannel Authentication
+];
+
+/// `ClaimSpecialIdentity`: Authenticated Users → each special identity group
+/// present in the graph (same domain prefix), and Everyone → the domain's
+/// Guest account when enabled.
+pub(crate) fn special_identities(g: &Graph) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    let split = |oid: &str, sid: &str| -> Option<String> {
+        if oid == sid {
+            Some(String::new())
+        } else {
+            oid.strip_suffix(sid).filter(|p| p.ends_with('-')).map(|p| p.to_string())
+        }
+    };
+    for grp in (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Group) {
+        let oid = g.oid(grp);
+        let Some(prefix) = SPECIAL_IDENTITIES.iter().find_map(|s| split(oid, s)) else { continue };
+        if let Some(au) = g.lookup(&format!("{prefix}S-1-5-11")).filter(|&x| g.kind(x) == NodeKind::Group) {
+            out.push((au, grp));
+        }
+    }
+    for d in (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Domain) {
+        let Some(guest) = g.lookup(&format!("{}-501", g.oid(d))) else { continue };
+        if g.kind(guest) != NodeKind::User || !g.has_flag(guest, flags::ENABLED) {
+            continue;
+        }
+        let everyone = g.lookup(&format!("{}-S-1-1-0", g.name(d))).filter(|&x| g.kind(x) == NodeKind::Group);
+        if let Some(e) = everyone {
+            out.push((e, guest));
+        }
+    }
+    out
+}
+
+/// `ProtectAdminGroups`: each domain's AdminSDHolder container → the objects
+/// of that domain marked `adminsdholderprotected`.
+pub(crate) fn protected_by_adminsdholder(g: &Graph) -> Vec<(u32, u32)> {
+    type P = serde_json::Map<String, serde_json::Value>;
+    let parse = |id: u32| -> P { serde_json::from_str(g.props(id)).unwrap_or_default() };
+    let mut holders: AHashMap<u32, u32> = AHashMap::new();
+    for c in (0..g.node_count() as u32).filter(|&i| g.kind(i) == NodeKind::Container) {
+        let raw = g.props(c);
+        if !raw.to_ascii_uppercase().contains("CN=ADMINSDHOLDER,CN=SYSTEM,") {
+            continue;
+        }
+        let p = parse(c);
+        let dn = p.get("distinguishedname").and_then(|v| v.as_str()).unwrap_or("").to_ascii_uppercase();
+        if dn.starts_with("CN=ADMINSDHOLDER,CN=SYSTEM,") {
+            if let Some(d) = domain_of(g, c) {
+                holders.entry(d).or_insert(c);
+            }
+        }
+    }
+    if holders.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for x in 0..g.node_count() as u32 {
+        let raw = g.props(x);
+        if !raw.contains("adminsdholderprotected") {
+            continue;
+        }
+        if parse(x).get("adminsdholderprotected").and_then(|v| v.as_bool()) != Some(true) {
+            continue;
+        }
+        if let Some(&h) = domain_of(g, x).and_then(|d| holders.get(&d)) {
+            if h != x {
+                out.push((h, x));
+            }
+        }
+    }
+    out
 }
 
 /// "`trusting` trusts `trusted`" pairs from the collected trust edges.
@@ -198,7 +317,7 @@ mod tests {
         let k = |n: &str| ch_model::builtin_edge_kind(n).unwrap();
         let oids = ["S-1-5-21-1", "S-1-5-21-2", "S-1-5-21-3", "S-1-5-21-2-1105", "S-1-5-21-2-1106"];
         let ud = flags::UNCONSTRAINED_DELEGATION;
-        let parts = GraphParts {
+        let parts = GraphParts { sessions: Vec::new(),
             kinds: vec![4, 4, 4, NodeKind::Computer as u8, NodeKind::Computer as u8],
             flags: vec![0, 0, 0, ud | flags::ENABLED, ud],
             names: vec![None; 5],
@@ -238,7 +357,7 @@ mod tests {
         let names = ["CORP.LOCAL", "PARTNER.LOCAL", "OTHER.LOCAL", "CORP$@PARTNER.LOCAL", "OTHER$@CORP.LOCAL", "PARTNER$@CORP.LOCAL", "CORP$@CORP.LOCAL"];
         let oids = ["S-1-5-21-1", "S-1-5-21-2", "S-1-5-21-3", "S-1-5-21-2-1201", "S-1-5-21-1-1202", "S-1-5-21-1-1203", "S-1-5-21-1-1204"];
         let props = [None, None, None, Some(r#"{"samaccountname":"CORP$"}"#), None, None, None];
-        let parts = GraphParts {
+        let parts = GraphParts { sessions: Vec::new(),
             kinds: vec![4, 4, 4, NodeKind::User as u8, NodeKind::User as u8, NodeKind::User as u8, NodeKind::User as u8],
             flags: vec![0; 7],
             names: names.iter().map(|s| Some(s.to_string())).collect(),

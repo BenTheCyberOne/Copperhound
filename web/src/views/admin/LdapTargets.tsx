@@ -19,6 +19,8 @@ const EMPTY: LdapTargetInput = {
   base_dn: "",
   include_configuration: true,
   interval_hours: 24,
+  probe: false,
+  assume_ntlm_allowed: false,
 };
 
 function Editor({ initial, onClose, onSaved }: { initial: LdapTargetInput; onClose: () => void; onSaved: () => void }) {
@@ -85,6 +87,18 @@ function Editor({ initial, onClose, onSaved }: { initial: LdapTargetInput; onClo
               <input type="checkbox" checked={f.allow_plain} onChange={(e) => set("allow_plain", e.target.checked)} />
               Allow plain LDAP without TLS (lab only; sends the password in clear)
             </label>
+            <label className="toggle multiline">
+              <input type="checkbox" checked={!!f.probe} onChange={(e) => set("probe", e.target.checked)} />
+              Probe computers for NTLM relay (SMB signing, DC LDAP signing, AD CS web enrollment over HTTP). Active network traffic to every
+              enabled computer.
+            </label>
+            {f.probe && (
+              <label className="toggle multiline">
+                <input type="checkbox" checked={!!f.assume_ntlm_allowed} onChange={(e) => set("assume_ntlm_allowed", e.target.checked)} />
+                Assume outgoing NTLM is allowed (the Windows default) when the policy is not collected. Without this, relay edges need
+                SharpHound's NTLM registry data.
+              </label>
+            )}
           </div>
         </details>
         <label className="form-field">

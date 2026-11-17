@@ -15,6 +15,8 @@ and how several collections are merged into one graph.
 | LDIF (`ldapsearch`, `ldifde`) | RFC 2849, `.ldif` / `.ldf` / `.ldif.gz`, any number of files / naming contexts | detected by content; ACLs decoded from `nTSecurityDescriptor` |
 | Sysinternals AD Explorer | snapshot `.dat` | memory-mapped, read in place |
 | OpenGraph (BloodHound CE format, any system) | `{"metadata":{"source_kind":…},"graph":{"nodes":[…],"edges":[…]}}` | custom node and edge kinds; see [Custom data (OpenGraph)](#custom-data-opengraph) |
+| CopperHound logon export | `{"meta":{"type":"copperhound-logons"},"data":[…]}` from `scripts/Export-CopperHoundLogons.ps1` | sessions from Security event 4624; see [Sessions from logon data](#sessions-from-logon-data) |
+| Microsoft Defender XDR `DeviceLogonEvents` | advanced hunting export as JSON array or `.csv` | sessions; same section |
 
 All inputs can be given as files, directories or `.zip` archives (zips may
 contain LDIF, `.ldif.gz` and snapshots too), on the CLI or uploaded to the
@@ -83,6 +85,42 @@ Known gaps versus SharpHound:
 - Template flag strings (`enrollmentflag`, `certificatenameflag`) are not
   rendered, only the derived booleans.
 
+## Sessions from logon data
+
+SharpHound finds sessions with NetSessionEnum and NetWkstaUserEnum, which
+current Windows versions restrict to administrators, so `HasSession` edges are
+often missing. Logon data fills the gap:
+
+- **Security event 4624**: `scripts/Export-CopperHoundLogons.ps1` reads the
+  Security log of the given computers (or a Windows Event Forwarding
+  collector's `ForwardedEvents`, `-LogName ForwardedEvents`) for the last
+  `-Days` days and writes one record per computer, user and logon type with the
+  first and last time seen. Run it with rights to read those logs.
+- **Microsoft Defender XDR**: export `DeviceLogonEvents` from advanced hunting
+  (for example `DeviceLogonEvents | where Timestamp > ago(7d) and ActionType == "LogonSuccess"`)
+  as CSV or JSON and upload it.
+
+Rules:
+- Only logon types that leave reusable credentials on the computer count:
+  interactive (2), batch (4), service (5), unlock (7), network cleartext (8),
+  new credentials (9), remote interactive (10) and the cached variants (11–13).
+  Network logons (3) do not.
+- The user must be a domain account (`S-1-5-21-…`) that the collected AD data
+  knows as a user. The computer is matched by SID when given, else by DNS name
+  (a bare host name matches a unique `HOST.*` computer). Unmatched records are
+  dropped and counted (`logon_sessions_unmatched` in the ingest report); no
+  node is created from logon data.
+- Logon sessions are not owned by any collection, so newer AD collections do
+  not remove them. They combine with SharpHound sessions: each `HasSession`
+  edge carries the first and last time it was seen, the sources and the logon
+  types (`sessions.bin` in the graph; CHQL `r.lastseen`, `r.firstseen`,
+  `r.sessionsources`, `r.logontypes`; `GET /edges/session`). SharpHound
+  sessions take their collection's time.
+- **Max age**: `--session-max-age-days N` (server: `ingest.session_max_age_days`)
+  drops sessions last seen more than N days before the newest time in the
+  input (collection and logon times, not the wall clock, so re-ingesting the
+  same files gives the same graph). Sessions with no known time are kept.
+
 ## Derived edges
 
 - **AD:** `DCSync` (from `GetChanges` + `GetChangesAll`), local-group rights
@@ -98,8 +136,10 @@ Known gaps versus SharpHound:
   templates), ESC4 (template control), ESC5 (control of CA, root, NTAuth and
   issuance policy objects), ESC6 (CA SAN flag), ESC7 (CA managers) and ESC15
   / EKUwu (schema v1 templates with a supplied subject, exploitable on CAs
-  without the November 2024 update). ESC8 / ESC11 (relay) are open for a
-  contributor; ESC16 needs CA registry data collectors do not gather.
+  without the November 2024 update). ESC8 / ESC11 (NTLM relay to AD CS) and
+  ESC16 are edges (docs/EDGES.md, "NTLM relay"); they need SharpHound's CA
+  registry and web enrollment data (or the built-in collector's probes for
+  HTTP web enrollment).
 - **Azure:** containment, membership, ownership, role assignments, RBAC
   (`AZOwner`, `AZContributor`, `AZUserAccessAdministrator`, …), managed
   identities, key vault access, MS Graph app permissions, plus post-processed
@@ -206,7 +246,9 @@ everything in the uploads directory) and builds one graph:
   actually contains (e.g. `member`, `nTSecurityDescriptor`).
 - **Sessions:** by default only the newest session data of each computer is
   kept; `--session-window-hours N` (server: `ingest.session_window_hours`)
-  also keeps sessions seen up to N hours earlier.
+  also keeps sessions seen up to N hours earlier. Sessions from logon data are
+  kept until they age out (`session_max_age_days`, see
+  [Sessions from logon data](#sessions-from-logon-data)).
 - **Old behaviour:** `--merge union` (server: `ingest.merge_policy: "union"`)
   unions everything (flags OR'd, last record's properties, all edges kept).
 - **Large groups in LDIF:** `member;range=X-Y` attributes and continuation

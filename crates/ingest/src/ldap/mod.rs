@@ -78,6 +78,15 @@ attrs! {
     AllowedToAct => "msDS-AllowedToActOnBehalfOfOtherIdentity": bin,
     AllowedToDelegateTo => "msDS-AllowedToDelegateTo",
     GmsaMembership => "msDS-GroupMSAMembership": bin,
+    HostServiceAccount => "msDS-HostServiceAccount",
+    // Facts added by the built-in collector's network probes (server/src/probe.rs).
+    ProbeSmbSigning => "copperhound-smbSigning",
+    ProbeLdapSigning => "copperhound-ldapSigning",
+    ProbeLdapAvailable => "copperhound-ldapAvailable",
+    ProbeLdapsAvailable => "copperhound-ldapsAvailable",
+    ProbeNtlmAssumed => "copperhound-ntlmAssumedAllowed",
+    ProbeWebEnrollment => "copperhound-webEnrollmentProbed",
+    ProbeHttpEnrollment => "copperhound-httpEnrollment",
     SidHistory => "sIDHistory": bin,
     WhenCreated => "whenCreated",
     WhenChanged => "whenChanged",
@@ -254,7 +263,7 @@ pub fn open(path: &Path, kind: InputKind, tmp: &Path) -> Result<Option<Input>> {
             let Some(out) = gunzip_ldif(path, tmp)? else { return Ok(None) };
             Source::Ldif(ldif::LdifFile::open(&out)?)
         }
-        InputKind::Json | InputKind::Zip => return Ok(None),
+        InputKind::Json | InputKind::Zip | InputKind::Csv => return Ok(None),
     };
     Ok(Some(Input { display, source: 0, src }))
 }

@@ -59,6 +59,11 @@ time) to see posture history and change alerts at work.
 - SharpHound CE / legacy and bloodhound-python JSON or zips, AzureHound JSON,
   ldapdomaindump output, LDIF exports (`ldapsearch`, `ldifde`, gzipped), Sysinternals AD
   Explorer snapshots (`.dat`) and OpenGraph JSON for custom node and edge kinds.
+- Logon data for sessions, when SharpHound cannot collect them: the output of
+  `scripts/Export-CopperHoundLogons.ps1` (Security event 4624) or a Defender XDR
+  `DeviceLogonEvents` export (CSV or JSON). Click a `HasSession` edge to see when
+  the session was last seen and by which source. **Admin → Server → Session max
+  age** drops sessions not seen recently.
 - **Rebuild graph** re-ingests every upload and swaps the new graph in without downtime.
   Several collections of the same domain are merged object by object, newest wins
   ("How merging works").
@@ -69,6 +74,16 @@ time) to see posture history and change alerts at work.
 Other ways in: the watch folder (**Admin → Server**), the built-in LDAP collector and
 collector clients (**Admin → Collectors**), and the BloodHound-compatible upload API, which
 lets existing SharpHound / AzureHound upload jobs point at CopperHound.
+
+NTLM relay edges (`CoerceAndRelayNTLMTo…`) need data LDAP does not hold: SMB
+signing, LDAP signing, the WebClient service, AD CS web enrollment and each
+computer's outgoing NTLM policy. SharpHound collects all of them. The built-in
+LDAP collector can probe some of them over the network (**More options → Probe
+computers for NTLM relay**, off by default). Probing sends traffic to every
+enabled computer. It covers SMB signing, DC LDAP signing and AD CS web
+enrollment over HTTP, but not WebClient. Relay edges are only drawn where outgoing
+NTLM is known to be allowed: from SharpHound, or because you ticked **Assume
+outgoing NTLM is allowed** (the Windows default) on the target.
 
 ## Explore: paths and the graph
 
@@ -82,9 +97,14 @@ lets existing SharpHound / AzureHound upload jobs point at CopperHound.
 
   ![All shortest paths from a helpdesk user](screenshots/all-paths.png)
 
+  **Optimise for** chooses what "shortest" means. **Fewest hops** is the classic
+  shortest path. **Least effort** and **Stealthiest** find the cheapest path by edge cost,
+  and each hop shows what it adds (see "Path costs" below).
+
 - **Queries**: the CHQL editor and the query library (below).
 - **Exposure**: how many principals of each kind can reach Tier Zero (or any zone), and
-  the choke-point edges that most paths cross.
+  the choke-point edges that most paths cross. **Cheapest routes to Tier Zero** ranks the
+  principals whose path costs least, by effort or stealth.
 
 On the canvas:
 
@@ -96,6 +116,21 @@ On the canvas:
   **How was this derived?**, which draws the collected edges and the facts the rule used.
 - **Table** lists everything on the canvas; **Export PNG**, **Export JSON** / **Import**
   save and restore a canvas; **Filters** hides kinds.
+
+### Path costs
+
+An attacker rarely takes the path with the fewest steps; they take the easiest or the
+quietest one. Each edge kind has a cost in two profiles:
+
+| | Cheap | Expensive |
+|---|---|---|
+| **Effort** | group membership (0), admin rights, ACL control, password reads | targeted Kerberoasting (`WriteSPN`), NTLM relay, AD CS chains, coercion |
+| **Stealth** | membership, shadow credentials, LAPS / gMSA reads | DCSync, password resets, group membership changes, NTLM relay |
+
+A session edge costs more the longer ago it was seen: the credentials may be gone. Age
+counts from the newest session in the data, so the same data always gives the same
+result. Admins can change any kind's cost with `PUT /path-costs` (docs/API.md, "Path
+costs"). From the CLI: `copperhound path <graph> --from X --to-tier0 --cost effort`.
 
 ## Queries (CHQL)
 

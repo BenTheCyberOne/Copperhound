@@ -6,6 +6,7 @@ pub mod explain;
 mod adcs;
 mod azure;
 mod hybrid;
+mod ntlm;
 mod repl;
 
 use ahash::AHashMap;
@@ -21,6 +22,7 @@ pub const PASSES: &[(&str, Pass)] = &[
     ("repl", repl::pass),
     ("ad", ad::pass),
     ("adcs", adcs::pass),
+    ("ntlm", ntlm::pass),
     ("azure", azure::pass),
     ("hybrid", hybrid::pass),
 ];
@@ -31,6 +33,7 @@ pub const PASSES: &[(&str, Pass)] = &[
 pub fn tier0_nodes(g: &Graph) -> Vec<u32> {
     hybrid::tier0_nodes(g)
 }
+
 
 /// Forests: connected components of domains over `SameForestTrust` (either
 /// direction — intra-forest trusts are two-way and transitive).
@@ -85,6 +88,31 @@ impl Forests {
     pub fn all(&self) -> &[Vec<u32>] {
         &self.sets
     }
+}
+
+/// A top-level boolean property read from raw property JSON without parsing
+/// it: `Some(b)` when `"key": true|false` occurs (keys are matched exactly,
+/// so `"key"` must be the whole key). Collector properties are flat objects;
+/// a nested object with the same key would also match, which callers accept
+/// for the flags they read (`isdc`).
+pub(crate) fn raw_bool(raw: &str, key: &str) -> Option<bool> {
+    let pat = format!("\"{key}\"");
+    let mut from = 0;
+    while let Some(i) = raw[from..].find(&pat) {
+        let rest = raw[from + i + pat.len()..].trim_start();
+        if let Some(v) = rest.strip_prefix(':') {
+            let v = v.trim_start();
+            if v.starts_with("true") {
+                return Some(true);
+            }
+            if v.starts_with("false") {
+                return Some(false);
+            }
+            return None;
+        }
+        from += i + pat.len();
+    }
+    None
 }
 
 /// Dense bitmap over node ids.
@@ -145,5 +173,19 @@ impl<'g> Members<'g> {
         let v = Arc::new(out);
         self.cache.lock().insert(id, v.clone());
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn raw_bool_reads_flat_flags() {
+        use super::raw_bool;
+        assert_eq!(raw_bool(r#"{"name":"x","isdc":true}"#, "isdc"), Some(true));
+        assert_eq!(raw_bool(r#"{"isdc" : false, "y": 1}"#, "isdc"), Some(false));
+        assert_eq!(raw_bool(r#"{"notisdc":true}"#, "isdc"), None);
+        assert_eq!(raw_bool(r#"{"description":"isdc","isdc":true}"#, "isdc"), Some(true));
+        assert_eq!(raw_bool(r#"{"isdc":null}"#, "isdc"), None);
+        assert_eq!(raw_bool("", "isdc"), None);
     }
 }

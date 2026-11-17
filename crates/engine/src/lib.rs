@@ -12,6 +12,7 @@
 //! * [`par_bfs`] — the shared level-synchronous, direction-optimising parallel
 //!   BFS behind exposure and reach; every level of the flow pass is parallel too.
 
+pub mod cost;
 pub mod net;
 
 use ahash::{AHashMap, AHashSet};
@@ -706,7 +707,7 @@ mod tests {
     /// 0 -GetChanges-> 4 (non-traversable)
     fn graph() -> Graph {
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        let (g, _) = Graph::build(GraphParts {
+        let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![1, 2, 3, 1, 2],
             flags: vec![0, 0, 0, 0, flags::TIER0],
             names: vec![None; 5],
@@ -775,7 +776,7 @@ mod tests {
     fn all_shortest_paths_diamond() {
         // 0→1→3, 0→2→3 (both length 2), 0→4→5→3 (longer); 1→3 twice via different kinds.
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-        let (g, _) = Graph::build(GraphParts {
+        let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![1; 6],
             flags: vec![0; 6],
             names: vec![None; 6],
@@ -822,7 +823,7 @@ mod tests {
                 Edge::new((rnd() % n as u64) as u32, (rnd() % n as u64) as u32, kind)
             })
             .collect();
-        Graph::build(GraphParts {
+        Graph::build(GraphParts { sessions: Vec::new(),
             kinds,
             flags,
             names: vec![None; n as usize],
@@ -931,7 +932,7 @@ mod tests {
         // 0 AD user -SyncedToEntraUser-> 1 AZUser -AZGlobalAdmin-> 2 AZTenant (T0)
         let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
         let k = |n: &str| ch_model::builtin_edge_kind(n).unwrap();
-        let (g, _) = Graph::build(GraphParts {
+        let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
             kinds: vec![NodeKind::User as u8, NodeKind::AzUser as u8, NodeKind::AzTenant as u8],
             flags: vec![0, 0, flags::TIER0],
             names: vec![None; 3],

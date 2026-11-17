@@ -86,7 +86,8 @@
         "WriteGPLink": "1:faabdd17e9a05401",
         "WriteOwner": "1:3ea989ce978c88a4",
         "WritePKINameFlag": "1:c66d60cea3c3cb74",
-        "WriteSPN": "1:ab9aaba268d053d9"
+        "WriteSPN": "1:ab9aaba268d053d9",
+        "DCFor": "1:a1a7da06f81fb495"
       },
       "nodes": {
         "AIACA": "1:c16b95a3ab470a3e",
@@ -112,7 +113,7 @@
       "add-to-privileged-groups": "0:0000000000000000 truncated=false",
       "add-to-tier0-groups": "0:0000000000000000 truncated=false",
       "adhoc-00": "14:854e36cd2dd92198 truncated=false",
-      "adhoc-01": "40:78bdc78349d86890 truncated=false",
+      "adhoc-01": "41:7fac18813dd68cd3 truncated=false",
       "adhoc-02": "1:a9c5d801eacbfd1a truncated=false",
       "adhoc-03": "1:2b6ec3d7e03616db truncated=false",
       "adhoc-04": "1:2c0ed48ba9773d9b truncated=false",
@@ -440,7 +441,8 @@
         "WriteGPLink": "1:faabdd17e9a05401",
         "WriteOwner": "1:3ea989ce978c88a4",
         "WritePKINameFlag": "1:c66d60cea3c3cb74",
-        "WriteSPN": "1:ab9aaba268d053d9"
+        "WriteSPN": "1:ab9aaba268d053d9",
+        "DCFor": "1:a1a7da06f81fb495"
       },
       "nodes": {
         "AIACA": "1:c16b95a3ab470a3e",
@@ -466,7 +468,7 @@
       "add-to-privileged-groups": "0:0000000000000000 truncated=false",
       "add-to-tier0-groups": "0:0000000000000000 truncated=false",
       "adhoc-00": "14:854e36cd2dd92198 truncated=false",
-      "adhoc-01": "40:78bdc78349d86890 truncated=false",
+      "adhoc-01": "41:7fac18813dd68cd3 truncated=false",
       "adhoc-02": "1:2b6ec3d7e03616db truncated=false",
       "adhoc-03": "1:2b6ec3d7e03616db truncated=false",
       "adhoc-04": "1:100badf0feab1cc5 truncated=false",
@@ -804,7 +806,8 @@
         "SyncedToADUser": "10000:45704acb2bd431bf",
         "SyncedToEntraGroup": "1:c00e37d7a1978012",
         "SyncedToEntraUser": "10000:4384a8eb4fb3d774",
-        "TrustedBy": "6:22447ababc910421"
+        "TrustedBy": "6:22447ababc910421",
+        "DCFor": "2:c435dcd8bd5d8002"
       },
       "nodes": {
         "AZGroup": "1:7f76e260283c6ba7",
@@ -824,7 +827,7 @@
       "add-to-privileged-groups": "0:0000000000000000 truncated=false",
       "add-to-tier0-groups": "0:0000000000000000 truncated=false",
       "adhoc-00": "8:8914dbcca21bddff truncated=false",
-      "adhoc-01": "29:6f0181d1b45c0c0f truncated=false",
+      "adhoc-01": "30:203702326365046b truncated=false",
       "adhoc-02": "1:7da5fcd8eafe4030 truncated=false",
       "adhoc-03": "1:6b9c83dd6758c6de truncated=false",
       "adhoc-04": "1:16e2e81d1aeff669 truncated=false",
@@ -992,7 +995,21 @@
       "user-control-computers": "0:0000000000000000 truncated=false",
       "users-to-da": "rows=0 truncated=true",
       "write-gplink": "0:0000000000000000 truncated=false",
-      "writedacl-anywhere": "0:0000000000000000 truncated=false"
+      "writedacl-anywhere": "0:0000000000000000 truncated=false",
+      "ot-assets": "rows=0 truncated=false",
+      "ot-assets-by-level": "0:0000000000000000 truncated=false",
+      "ot-broad-group-access": "0:0000000000000000 truncated=false",
+      "ot-can-program": "0:0000000000000000 truncated=false",
+      "ot-dmz-admins": "0:0000000000000000 truncated=false",
+      "ot-it-into-ot": "rows=0 truncated=false",
+      "ot-legacy-os": "0:0000000000000000 truncated=false",
+      "ot-no-laps": "0:0000000000000000 truncated=false",
+      "ot-paths-to-controllers": "rows=0 truncated=false",
+      "ot-paths-to-ews": "rows=0 truncated=false",
+      "ot-remote-access": "0:0000000000000000 truncated=false",
+      "ot-sessions": "0:0000000000000000 truncated=false",
+      "ot-tier0-sessions": "rows=0 truncated=false",
+      "ot-unconstrained": "0:0000000000000000 truncated=false"
     },
     "plan": {
       "baseline": 123277,
@@ -1141,7 +1158,8 @@
         "SyncedToADUser": "300:e3236a4f247e1188",
         "SyncedToEntraGroup": "1:db443f941ee475ab",
         "SyncedToEntraUser": "300:4bd1b6993b5bf0e0",
-        "TrustedBy": "6:22447ababc910421"
+        "TrustedBy": "6:22447ababc910421",
+        "DCFor": "2:eed5801b53a53b98"
       },
       "nodes": {
         "AZGroup": "1:7f76e260283c6ba7",
@@ -1161,7 +1179,7 @@
       "add-to-privileged-groups": "0:0000000000000000 truncated=false",
       "add-to-tier0-groups": "0:0000000000000000 truncated=false",
       "adhoc-00": "8:e914cc86e4553279 truncated=false",
-      "adhoc-01": "29:4b72d8725076ccfd truncated=false",
+      "adhoc-01": "30:169b182a78cf3c8f truncated=false",
       "adhoc-02": "1:0f44ad268b0b420d truncated=false",
       "adhoc-03": "1:93af293b9b43e5a8 truncated=false",
       "adhoc-04": "1:d795af92687d2785 truncated=false",

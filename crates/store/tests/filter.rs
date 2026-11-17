@@ -125,7 +125,7 @@ fn random_graph(seed: u64, n: usize) -> Graph {
     }
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
     let edges = (1..n as u32).map(|i| Edge::new(i, i / 2, 0)).collect();
-    Graph::build(GraphParts {
+    Graph::build(GraphParts { sessions: Vec::new(),
         kinds,
         flags: fl,
         names,
@@ -326,7 +326,7 @@ fn string_column_with_clean_domain() {
     let mut r = Rng(3);
     let props: Vec<Option<String>> = (0..n).map(|_| Some(json!({"domain": r.pick(DOMAINS), "n": r.below(5)}).to_string())).collect();
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-    let (g, _) = Graph::build(GraphParts {
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
         kinds: vec![NodeKind::User as u8; n],
         flags: vec![0; n],
         names: (0..n).map(|i| Some(format!("U{i}"))).collect(),
@@ -402,7 +402,7 @@ fn search_ranks_exact_prefix_then_substring() {
     let n = 8;
     let names = ["ALICE@CORP", "ALICE.ADMIN@CORP", "BOB@CORP", "MALICE@CORP", "AL@CORP", "XALICEX@CORP", "", "ALICIA@CORP"];
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-    let (g, _) = Graph::build(GraphParts {
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
         kinds: vec![NodeKind::User as u8; n],
         flags: vec![0; n],
         names: names.iter().map(|s| (!s.is_empty()).then(|| s.to_string())).collect(),
@@ -431,7 +431,7 @@ fn search_ranks_exact_prefix_then_substring() {
 fn chql_aligned_edge_cases() {
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
     let props = [r#"{"d":"a","x":null}"#, r#"{"d":"A"}"#, r#"{"d":"b"}"#, r#"{}"#];
-    let (g, _) = Graph::build(GraphParts {
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
         kinds: vec![NodeKind::User as u8; 4],
         flags: vec![0; 4],
         names: (0..4).map(|i| Some(format!("N{i}"))).collect(),
@@ -469,7 +469,7 @@ fn chql_aligned_edge_cases() {
 fn search_prefix_ranks_shortest_over_whole_range() {
     let n = 20_000;
     let (edge_kinds, traversable) = ch_model::builtin_kind_tables();
-    let (g, _) = Graph::build(GraphParts {
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
         kinds: vec![NodeKind::User as u8; n],
         flags: vec![0; n],
         names: (0..n).map(|i| Some(format!("USER{i}@CORP"))).collect(),

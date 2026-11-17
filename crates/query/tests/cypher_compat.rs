@@ -164,9 +164,9 @@ const NEEDS_CHANGE: &[(&str, &str, &str, &str)] = &[
      "CHQL is read-only; mark owned objects through the API",
      "MATCH (u:User {name:'JDOE@CORP.LOCAL'}) RETURN u"),
     ("Edge kind not in the data model",
-     "MATCH p=(:User)-[:SQLAdmin]->(:Computer) RETURN p",
+     "MATCH p=(:User)-[:CanApplyGPO]->(:Computer) RETURN p",
      "a relationship list made only of unknown kinds is reported as an error (lists mixing known and unknown kinds run)",
-     "MATCH p=(:User)-[:SQLAdmin|AdminTo]->(:Computer) RETURN p"),
+     "MATCH p=(:User)-[:CanApplyGPO|AdminTo]->(:Computer) RETURN p"),
 ];
 
 // -------------------------------------------------------------------- fixture
@@ -247,7 +247,7 @@ fn fixture() -> Graph {
         e(17, 18, kind("PublishedTo")),
         e(19, 20, kind("AZHasRole")),
     ];
-    let (g, _) = Graph::build(GraphParts {
+    let (g, _) = Graph::build(GraphParts { sessions: Vec::new(),
         kinds: nodes.iter().map(|n| n.kind as u8).collect(),
         flags: nodes.iter().map(|n| n.flags).collect(),
         names: nodes.iter().map(|n| Some(n.name.to_string())).collect(),

@@ -262,6 +262,11 @@ pub fn lenient_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>,
     Ok(Scalar::deserialize(d)?.0)
 }
 
+/// Small unsigned integer from a number or numeric string; anything else → `None`.
+pub fn lenient_u16<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u16>, D::Error> {
+    Ok(Scalar::deserialize(d)?.0.and_then(|s| s.trim().parse::<u16>().ok()))
+}
+
 /// Trust direction: 0..=3 or "Disabled"/"Inbound"/"Outbound"/"Bidirectional".
 pub fn trust_direction<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u8>, D::Error> {
     Ok(Scalar::deserialize(d)?

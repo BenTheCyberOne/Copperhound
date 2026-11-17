@@ -17,6 +17,8 @@ use serde_json::{Map, Value};
 const OID_ANY_PURPOSE: &str = "2.5.29.37.0";
 const OID_CERT_REQUEST_AGENT: &str = "1.3.6.1.4.1.311.20.2.1";
 const OID_CLIENT_AUTH: &str = "1.3.6.1.5.5.7.3.2";
+/// szOID_NTDS_CA_SECURITY_EXT: the SID security extension (KB5014754).
+const OID_SID_EXTENSION: &str = "1.3.6.1.4.1.311.25.2";
 
 type Props = Map<String, Value>;
 
@@ -263,6 +265,8 @@ pub(crate) enum Why {
     Victim { e: u32, t: u32, victim: u32 },
     /// ESC3: agent template `ct1` (published by `eca1`) enrolls on behalf of `ct2` at `e`.
     Esc3 { e: u32, ct1: u32, ct2: u32, eca1: u32, agents: bool },
+    /// ESC8 / ESC11: the coerced computer can enroll on `t` at `e`.
+    Relay { e: u32, t: u32 },
 }
 
 /// At most this many witnesses are kept per explained edge.
@@ -304,6 +308,13 @@ fn run(g: &Graph, want: Option<(u32, u32, u16)>) -> (Vec<Edge>, Vec<Why>) {
     ];
     let k: AHashMap<&'static str, u16> = names.iter().map(|&nm| (nm, ek_of(nm))).collect();
     let cx = Ctx { g, m: Members::new(g), props, special, k, forests: Forests::new(g) };
+    let relay_kinds = ["CoerceAndRelayNTLMToADCS", "CoerceAndRelayNTLMToADCSRPC"];
+    let any_relay_ca = ecas.iter().any(|&e| {
+        let p = cx.p(e);
+        b(p, "hasvulnerableendpoint") == Some(true) || b(p, "rpcencryptionenforced") == Some(false)
+    });
+    // Built only when a CA accepts relayed NTLM (it reads every computer).
+    let nt = any_relay_ca.then(|| super::ntlm::Ntlm::new(g, &cx.m));
 
     let mut out: AHashSet<(u32, u32, u16)> = AHashSet::new();
     let mut whys: Vec<Why> = Vec::new();
@@ -490,6 +501,11 @@ fn run(g: &Graph, want: Option<(u32, u32, u16)>) -> (Vec<Edge>, Vec<Why>) {
         }
         let ce = cx.ca_enrollers(e);
         let san_enabled = b(&ep, "isuserspecifiessanenabledcollected") == Some(true) && b(&ep, "isuserspecifiessanenabled") == Some(true);
+        // ESC16: the CA leaves the SID security extension out of every certificate.
+        let no_sid_ext = b(&ep, "disabledextensionscollected") == Some(true)
+            && list(&ep, "disabledextensions").iter().any(|x| x == OID_SID_EXTENSION);
+        // ESC8 (web enrollment over HTTP / HTTPS without EPA) and ESC11 (RPC without encryption).
+        let relay = [b(&ep, "hasvulnerableendpoint") == Some(true), b(&ep, "rpcencryptionenforced") == Some(false)];
         for t in published(e) {
             let tp = cx.p(t).clone();
             let te = cx.template_enrollers(t);
@@ -582,6 +598,32 @@ fn run(g: &Graph, want: Option<(u32, u32, u16)>) -> (Vec<Edge>, Vec<Why>) {
                             }
                             if esc10 && cx.upn_mapping(d) {
                                 emit(a, d, if variant_a { "ADCSESC10a" } else { "ADCSESC10b" }, why);
+                            }
+                        }
+                    }
+                }
+            }
+            // ESC16
+            if san_enabled && no_sid_ext && rma == Some(false) && auth == Some(true) && sig == Some(true) {
+                for p in cx.dns_filter(cx.cross_product(&[te.clone(), ce.clone()]), t) {
+                    for &d in ds {
+                        emit(p, d, "ADCSESC16", Why::Enroll { e, t });
+                    }
+                }
+            }
+            // ESC8 / ESC11: coerce a computer that can enroll and relay its NTLM to the CA.
+            if let Some(nt) = nt.as_ref().filter(|_| relay.contains(&true)) {
+                if rma == Some(false) && auth == Some(true) && sig == Some(true) {
+                    for v in cx.victims(&te, &ce) {
+                        if g.kind(v) != NodeKind::Computer || nt.victim(v).is_none() {
+                            continue;
+                        }
+                        for &d in ds {
+                            let Some(au) = nt.auth_users(d) else { continue };
+                            for (on, kind) in relay.iter().zip(relay_kinds) {
+                                if *on {
+                                    emit(au, v, kind, Why::Relay { e, t });
+                                }
                             }
                         }
                     }

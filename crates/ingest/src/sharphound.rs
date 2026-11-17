@@ -3,7 +3,7 @@
 use crate::de::{lenient_bool, lenient_string, trust_direction, Ref, Results};
 use crate::emit::Emitter;
 use crate::merge::cat;
-use ch_model::{ek, flags, NodeKind};
+use ch_model::{ek, ek_of, flags, NodeKind};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -52,6 +52,9 @@ pub struct Session {
     pub computer: Option<String>,
     #[serde(rename = "UserSID")]
     pub user: Option<String>,
+    /// SharpHound v2.6+: the Windows logon type, when known.
+    #[serde(rename = "LogonType", deserialize_with = "crate::de::lenient_u16")]
+    pub logon_type: Option<u16>,
 }
 
 #[derive(Deserialize, Default)]
@@ -156,6 +159,33 @@ pub struct Record {
     // ---- DC certificate-mapping registry values (computers)
     #[serde(rename = "DCRegistryData")]
     pub dc_registry: Option<DcRegistry>,
+    // ---- NTLM relay inputs (computers, enterprise CAs). Kept as JSON values:
+    // their shape has changed between collector versions.
+    #[serde(rename = "SmbInfo")]
+    pub smb_info: Option<serde_json::Value>,
+    #[serde(rename = "IsWebClientRunning")]
+    pub webclient: Option<serde_json::Value>,
+    #[serde(rename = "NTLMRegistryData")]
+    pub ntlm_registry: Option<serde_json::Value>,
+    #[serde(rename = "HttpEnrollmentEndpoints")]
+    pub http_enrollment: Option<serde_json::Value>,
+    #[serde(rename = "IsDC", deserialize_with = "lenient_bool")]
+    pub is_dc: Option<bool>,
+    /// Standalone managed service accounts installed on a computer.
+    #[serde(rename = "DumpSMSAPassword")]
+    pub dump_smsa: Option<Vec<Ref>>,
+    /// User `SPNTargets` (`{ComputerSID, Port, Service}`; Service `SQLAdmin`).
+    #[serde(rename = "SPNTargets")]
+    pub spn_targets: Option<Vec<SpnTarget>>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct SpnTarget {
+    #[serde(rename = "ComputerSID")]
+    pub computer: Option<String>,
+    #[serde(rename = "Service", deserialize_with = "lenient_string")]
+    pub service: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -215,6 +245,10 @@ pub struct CaRegistry {
     pub user_specifies_san: Option<Collected<bool>>,
     #[serde(rename = "RoleSeparationEnabled")]
     pub role_separation: Option<Collected<bool>>,
+    #[serde(rename = "RPCEncryptionEnforced")]
+    pub rpc_encryption: Option<Collected<bool>>,
+    #[serde(rename = "DisabledExtensions")]
+    pub disabled_extensions: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Default)]
@@ -242,6 +276,68 @@ fn derived_props(r: &Record) -> Vec<(&'static str, serde_json::Value)> {
         if let Some(rs) = ca.role_separation.as_ref().filter(|c| c.collected == Some(true)) {
             out.push(("roleseparationenabled", Value::Bool(rs.value.unwrap_or(false))));
         }
+        if let Some(rpc) = ca.rpc_encryption.as_ref().filter(|c| c.collected == Some(true)) {
+            if let Some(v) = rpc.value {
+                out.push(("rpcencryptionenforced", Value::Bool(v)));
+            }
+        }
+        if let Some(de) = ca.disabled_extensions.as_ref().filter(|v| collected(v)) {
+            let list: Vec<Value> = de
+                .get("Data")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter(|x| x.is_string()).cloned().collect())
+                .unwrap_or_default();
+            out.push(("disabledextensions", Value::Array(list)));
+            out.push(("disabledextensionscollected", Value::Bool(true)));
+        }
+    }
+    // Computers: SMB signing, WebClient, outbound NTLM restriction.
+    if let Some(v) = r.smb_info.as_ref().filter(|v| collected(v)) {
+        if let Some(b) = v.get("Result").and_then(|r| r.get("SigningEnabled")).and_then(Value::as_bool) {
+            out.push(("smbsigning", Value::Bool(b)));
+        }
+    }
+    if let Some(v) = r.webclient.as_ref().filter(|v| collected(v)) {
+        if let Some(b) = v.get("Result").and_then(Value::as_bool) {
+            out.push(("webclientrunning", Value::Bool(b)));
+        }
+    }
+    if let Some(v) = r.ntlm_registry.as_ref().filter(|v| collected(v)) {
+        let res = v.get("Result");
+        let num = |k: &str| res.and_then(|r| r.get(k)).and_then(Value::as_u64);
+        // RestrictSendingNtlmTraffic / RestrictReceivingNTLMTraffic:
+        // 0 allow all (the default when absent), 1 audit, 2 deny all.
+        out.push(("restrictoutboundntlm", Value::Bool(num("RestrictSendingNtlmTraffic") == Some(2))));
+        out.push(("restrictreceivingntlmtraffic", Value::Bool(num("RestrictReceivingNTLMTraffic") == Some(2))));
+        if let Some(l) = num("LmCompatibilityLevel") {
+            out.push(("lmcompatibilitylevel", Value::from(l)));
+        }
+    }
+    if let Some(dc) = r.is_dc {
+        out.push(("isdc", Value::Bool(dc)));
+    }
+    // Enterprise CAs: web enrollment endpoints that accept relayed NTLM.
+    if let Some(eps) = r.http_enrollment.as_ref().and_then(Value::as_array) {
+        let mut http = Vec::new();
+        let mut https = Vec::new();
+        let mut any = false;
+        for ep in eps.iter().filter(|e| collected(e)) {
+            any = true;
+            let res = ep.get("Result");
+            let flag = |k: &str| res.and_then(|r| r.get(k)).and_then(Value::as_bool) == Some(true);
+            let url = res.and_then(|r| r.get("Url")).and_then(Value::as_str).unwrap_or("").to_string();
+            if flag("ADCSWebEnrollmentHTTP") {
+                http.push(Value::String(url.clone()));
+            }
+            if flag("ADCSWebEnrollmentHTTPS") && !flag("ADCSWebEnrollmentEPA") {
+                https.push(Value::String(url));
+            }
+        }
+        if any {
+            out.push(("hasvulnerableendpoint", Value::Bool(!http.is_empty() || !https.is_empty())));
+            out.push(("httpenrollmentendpoints", Value::Array(http)));
+            out.push(("httpsenrollmentendpoints", Value::Array(https)));
+        }
     }
     if let Some(dc) = &r.dc_registry {
         for (key, v) in [
@@ -254,6 +350,11 @@ fn derived_props(r: &Record) -> Vec<(&'static str, serde_json::Value)> {
         }
     }
     out
+}
+
+/// `{"Collected": true, ...}`.
+fn collected(v: &serde_json::Value) -> bool {
+    v.get("Collected").and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 fn merge_props(raw: Option<Box<RawValue>>, extra: Vec<(&'static str, serde_json::Value)>) -> Option<Box<str>> {
@@ -427,16 +528,32 @@ pub fn extract(mut r: Record, em: &mut Emitter) {
             em.edge(x, me, ek::ALLOWED_TO_ACT);
         }
     }
+    em.scope(me, cat::DUMP_SMSA, r.dump_smsa.is_some());
+    for t in r.dump_smsa.iter().flatten() {
+        if let Some(x) = em.hint(&t.id, Some(NodeKind::User)) {
+            em.edge(me, x, ek_of("DumpSMSAPassword"));
+        }
+    }
+    em.scope(me, cat::SPN_TARGETS, r.spn_targets.is_some());
+    for t in r.spn_targets.iter().flatten() {
+        if !t.service.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("SQLAdmin")) {
+            continue;
+        }
+        if let Some(c) = t.computer.as_deref().and_then(|c| em.hint(c, Some(NodeKind::Computer))) {
+            em.edge(me, c, ek_of("SQLAdmin"));
+        }
+    }
     em.scope(me, cat::SID_HISTORY, r.sid_history.is_some());
     for t in r.sid_history.iter().flatten() {
         if let Some(x) = em.hint_str(&t.id, t.ty.as_deref()) {
             em.edge(me, x, ek::HAS_SID_HISTORY);
         }
     }
-    for (block, c) in [
-        (&r.sessions, cat::SESSIONS),
-        (&r.privileged_sessions, cat::PRIV_SESSIONS),
-        (&r.registry_sessions, cat::REG_SESSIONS),
+    use ch_store::session_source as ss;
+    for (block, c, source) in [
+        (&r.sessions, cat::SESSIONS, ss::SESSIONS),
+        (&r.privileged_sessions, cat::PRIV_SESSIONS, ss::PRIVILEGED),
+        (&r.registry_sessions, cat::REG_SESSIONS, ss::REGISTRY),
     ] {
         em.scope(me, c, block.as_ref().is_some_and(|b| b.collected()));
         for s in block.iter().flat_map(|b| b.0.iter()) {
@@ -453,6 +570,17 @@ pub fn extract(mut r: Record, em: &mut Emitter) {
                 .and_then(|c| em.hint(c, Some(NodeKind::Computer)))
                 .unwrap_or(me);
             em.edge(comp, user, ek::HAS_SESSION);
+            if comp != user {
+                em.session(crate::emit::SessionObs {
+                    computer: crate::emit::ObsRef::Id(comp),
+                    user: crate::emit::ObsRef::Id(user),
+                    first: 0,
+                    last: 0,
+                    sources: source,
+                    logon_types: s.logon_type.filter(|&t| t < 16).map_or(0, |t| 1 << t),
+                    add_edge: false,
+                });
+            }
         }
     }
     for (block, kind, c) in [
